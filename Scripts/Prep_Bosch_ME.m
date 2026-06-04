@@ -108,7 +108,7 @@ for i = 1:length(csv_files)
 end   
     % --- Your existing Log Merging / Time Alignment logic goes here ---
     % ...
-%% 2. EXECUTION BLOCK
+    
 % Initialize empty tables and our global time offset tracker
 Master_Log_Full   = table();
 Master_Log_WOT    = table();

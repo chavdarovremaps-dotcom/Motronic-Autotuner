@@ -1,5 +1,9 @@
-function ExportAllMapsToExcel(filename, KFLDIMX_Map, KFLDRL_Map, KFLDRL_Counts, Abs_WGDC_Map, Abs_WGDC_Counts, Base_Pressure_Curve, Base_Pressure_Counts, KFVPDKSD_Map, KFFWL_Map, KFFWL_Counts, KFFWLW_Map, KFFWLW_Counts, FKKVS_RL_Map, FKKVS_Map, FKKVS_Counts, KFZW_Map, KFZW_Counts, KFZW2_Map, KFZW2_Counts, axis_rpm_boost, axis_boost, axis_boost_abs, axis_kfldrl_x, axis_rpm_kfvp, axis_pratio_kfvp, axis_tmot, axis_load_kffwlw, axis_rpm_kffwlw, axis_rpm_fuel, axis_te, axis_rpm_ign, axis_load_ign)
-%% ========================================================================
+function ExportAllMapsToExcel(filename, KFLDIMX_Map, KFLDRL_Map, KFLDRL_Counts, Abs_WGDC_Map, Abs_WGDC_Counts, ...
+                              Base_Pressure_Curve, Base_Pressure_Counts, KFVPDKSD_Map, ...
+                              KFFWL_Map, KFFWL_Counts, KFFWLW_Map, KFFWLW_Counts, FKKVS_RL_Map, ...
+                              FKKVS_Map, FKKVS_Counts, KFZW_Map, KFZW_Counts, KFZW2_Map, KFZW2_Counts, ...
+                              KFURL_Map, KFPRG_Map, Saugrohr_Counts, ...
+                              axis_rpm_boost, axis_boost, axis_boost_abs, axis_kfldrl_x, axis_rpm_kfvp, axis_pratio_kfvp, axis_tmot, axis_load_kffwlw, axis_rpm_kffwlw, axis_rpm_fuel, axis_te, axis_rpm_ign, axis_load_ign, axis_rpm_url, axis_vvt_url)
 % FUNCTION: Side-By-Side Excel Exporter
 % ========================================================================    
 output_cells = {};
@@ -61,6 +65,19 @@ output_cells = {};
     add_linked_maps_to_sheet('KFZW (Ignition Knock Correction - VVT OFF)', KFZW_Map, 'KFZW - SAMPLE WEIGHTS', KFZW_Counts, axis_load_ign, axis_rpm_ign);
     add_linked_maps_to_sheet('KFZW2 (Ignition Knock Correction - VVT ON)', KFZW2_Map, 'KFZW2 - SAMPLE WEIGHTS', KFZW2_Counts, axis_load_ign, axis_rpm_ign);
     
+
+% =========================================================================
+    % SAUGROHRMODELL EXPORT (2D KFURL & KFPRG)
+    % =========================================================================
+    if ~isempty(KFURL_Map)
+        add_linked_maps_to_sheet('KFURL: Volumetric Efficiency Slope (% / hPa)', KFURL_Map, 'KFURL - SAMPLE WEIGHTS', Saugrohr_Counts, axis_vvt_url, axis_rpm_url);
+        add_linked_maps_to_sheet('KFPRG: Residual Exhaust Gas Pressure (hPa)', KFPRG_Map, 'KFPRG - SAMPLE WEIGHTS', Saugrohr_Counts, axis_vvt_url, axis_rpm_url);
+    end
+    
+
+
+
+
     if ~isempty(output_cells)
         writecell(output_cells, filename, 'Sheet', 'Tuning Maps');
         disp(['Success! All generated maps saved to: ', filename]);

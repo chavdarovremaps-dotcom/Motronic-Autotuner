@@ -29,14 +29,16 @@ config.vars.knock   = 'wkrm';
 config.vars.vvt     = 'wnwi_w';      
 config.vars.tmot    = 'tmot'; 
 config.vars.pedal   = 'wped';
-config.vars.time    = 'Time';    
+config.vars.ps_w    = 'ps_w';
+config.vars.time    = 'Time';
+
 
 % --- PREP & FILTER SETTINGS ---
 config.prep.wot_min          = 95; 
 config.prep.temp_max         = 80;
 config.prep.ALIGN_TIMESTAMPS = 1;
 config.prep.HACK_5120        = 0;
-config.prep.pressure_columns = {'pvdks_w', 'pu', 'pssol_w', 'pvdk_w', 'plgru_w'};
+config.prep.pressure_columns = {'pvdks_w', 'pu', 'pssol_w', 'pvdk_w', 'plgru_w','ps_w'};
 
 % --- GLOBAL PARAMETERS ---
 config.params.min_samples         = 2;          

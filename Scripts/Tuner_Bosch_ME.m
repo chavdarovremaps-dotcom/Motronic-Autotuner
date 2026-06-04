@@ -102,12 +102,15 @@ READY_KFVP   = ~isempty(axis_rpm_kfvp) && ~isempty(axis_pratio_kfvp) && ~isempty
 READY_FUEL   = ~isempty(axis_rpm_fuel) && ~isempty(axis_te) && ~isempty(base_fkkvs);
 READY_IGN    = ~isempty(axis_rpm_ign) && ~isempty(axis_load_ign) && ~isempty(base_kfzw);
 READY_WARMUP = ~isempty(axis_rpm_kffwlw) && ~isempty(axis_load_kffwlw) && ~isempty(base_kffwlw);
+READY_SAUGROHR = ~isempty(axis_rpm_url) && ~isempty(axis_vvt_url) && ~isempty(base_kfurl) && ~isempty(base_kfprg);
+
 
 if ~READY_BOOST,  disp('[WARNING] KFLDIMX (Boost) skipped: Missing axes or base map in preset.'); end
 if ~READY_KFVP,   disp('[WARNING] KFVPDKSD (Handover) skipped: Missing axes or base map in preset.'); end
 if ~READY_FUEL,   disp('[WARNING] FKKVS (Fueling) skipped: Missing axes or base map in preset.'); end
 if ~READY_IGN,    disp('[WARNING] KFZW (Ignition) skipped: Missing axes or base map in preset.'); end
 if ~READY_WARMUP, disp('[WARNING] KFFWLW (Warmup) skipped: Missing axes or base map in preset.'); end
+if ~READY_SAUGROHR, disp('[WARNING] Saugrohrmodell skipped: Missing KFURL/KFPRG axes or base maps.'); end
 
 if READY_BOOST && READY_KFVP && READY_FUEL && READY_IGN && READY_WARMUP
     disp('All primary maps and axes loaded successfully. Ready to tune.');
@@ -134,13 +137,13 @@ try data_hot = readtable(fullfile(prep_dir, filename_hot)); catch, data_hot = ta
 
 % Initialize variables to prevent Excel exporter crashes if a module is skipped
 
-% Initialize variables to prevent Excel exporter crashes if a module is skipped
 KFLDIMX_Map=[]; KFLDRL_Map=[]; Abs_WGDC_Map=[]; axis_boost_abs=[];
 KFLDRL_Counts=[]; Abs_WGDC_Counts=[]; Base_Pressure_Counts=[];
 Base_Pressure_Curve=[]; KFVPDKSD_Map=[]; 
 FKKVS_Map=[]; FKKVS_Counts=[]; 
 KFZW_Map=[]; KFZW2_Map=[]; KFZW_Counts=[]; KFZW2_Counts=[];
 KFFWL_Map=[]; KFFWL_Counts=[]; KFFWLW_Map=[]; KFFWLW_Counts=[]; FKKVS_RL_Map=[];
+KFURL_Map=[]; KFPRG_Map=[]; Saugrohr_Counts=[];
 disp(' ');
 
 % --- Run Boost Calibration ---
@@ -190,6 +193,17 @@ if READY_IGN && ~isempty(data_full)
     disp(' ');
 end
 
+% --- Run Intake Manifold Model ---
+if READY_SAUGROHR && ~isempty(data_wot)
+    disp('--- STARTING INTAKE MANIFOLD CALIBRATION ---');
+    try
+        [KFURL_Map, KFPRG_Map, Saugrohr_Counts] = GenerateSaugrohrmodell(data_wot, axis_rpm_url, axis_vvt_url, base_kfurl, base_kfprg, log_vars, min_samples);
+        disp('Successfully recalculated 2D KFURL and KFPRG via Linear Regression.');
+    catch ME
+        disp(['Saugrohr Map Error: ', ME.message]); 
+    end
+    disp(' ');
+end
 % --- Excel Export ---
 if EXPORT_TO_EXCEL == 1
     disp('--- EXPORTING MAPS TO EXCEL ---');
@@ -197,7 +211,8 @@ if EXPORT_TO_EXCEL == 1
                          Base_Pressure_Curve, Base_Pressure_Counts, KFVPDKSD_Map, ...
                          KFFWL_Map, KFFWL_Counts, KFFWLW_Map, KFFWLW_Counts, FKKVS_RL_Map, ...
                          FKKVS_Map, FKKVS_Counts, KFZW_Map, KFZW_Counts, KFZW2_Map, KFZW2_Counts, ...
-                         axis_rpm_boost, axis_boost, axis_boost_abs, axis_kfldrl_x, axis_rpm_kfvp, axis_pratio_kfvp, axis_tmot, axis_load_kffwlw, axis_rpm_kffwlw, axis_rpm_fuel, axis_te, axis_rpm_ign, axis_load_ign);
+                         KFURL_Map, KFPRG_Map, Saugrohr_Counts, ... 
+                         axis_rpm_boost, axis_boost, axis_boost_abs, axis_kfldrl_x, axis_rpm_kfvp, axis_pratio_kfvp, axis_tmot, axis_load_kffwlw, axis_rpm_kffwlw, axis_rpm_fuel, axis_te, axis_rpm_ign, axis_load_ign, axis_rpm_url, axis_vvt_url);
     disp(['Success! Maps saved to: ', excel_filename]);
 end
 disp('Master Suite Execution Complete.');
