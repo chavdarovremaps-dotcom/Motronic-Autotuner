@@ -2,6 +2,8 @@
 % BOSCH ME7/ME9 MASTER TUNING SUITE: Boost, Handover, Fuel, Ignition
 % =========================================================================
 clear; clc; close all;
+% Add the utils folder to MATLAB's search path
+addpath(fullfile(fileparts(mfilename('fullpath')), 'Utilities'));
 
 %% 1. GLOBAL CONTROL CENTER & JSON PRESET MANAGER
 % =========================================================================
