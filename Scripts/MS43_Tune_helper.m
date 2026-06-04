@@ -3,49 +3,93 @@
 % =========================================================================
 clear; clc; close all;
 
-%% 1. GLOBAL CONTROL CENTER
+%% 1. GLOBAL CONTROL CENTER & JSON PRESET MANAGER
 % =========================================================================
-% 1.1 WORKFLOW & FILE MANAGEMENT
-% =========================================================================
-PROCESS_RAW_LOGS = 1; % 1 = Parse raw folder & build Master Log, 0 = Skip to VE Tuning
+% 'manual' = Use settings typed below
+% 'save'   = Use settings typed below AND save to JSON
+% 'load'   = Load directly from JSON (ignores settings below)
+PRESET_MODE = 'manual';           
+preset_file = 'preset_MS43_Default.json'; 
 
-raw_log_folder  = 'D:\Damos files\Matlab scripts\MS43Logs'; 
-filename_log    = 'MS43_Master_Log.csv';      % Cached full data
-filename_ve_log = 'MS43_ClosedLoop_VE.csv';   % Isolated VE tuning data
-excel_filename  = 'MS43_Tuning_Maps.xlsx';
+if strcmp(PRESET_MODE, 'manual') || strcmp(PRESET_MODE, 'save')
 
-% =========================================================================
-% 1.2 LOGGER VARIABLE NAMES (Fuzzy matching enabled)
-% =========================================================================
-log_vars.rpm        = 'Engine Speed';
-log_vars.map        = 'Manifold Pressure';
-log_vars.ve_table   = 'Active VE Table';
-log_vars.load       = 'Engine Load Injection';
-log_vars.inj        = 'Injection Time Average';  
-log_vars.full_load  = 'Full Load';
+    % --- 1.1 WORKFLOW & FILES ---
+    config.workflow.PROCESS_RAW_LOGS = 1;
+    config.files.raw_log_folder  = 'D:\Damos files\Matlab scripts\MS43Logs'; 
+    config.files.filename_log    = 'MS43_Master_Log.csv';      
+    config.files.filename_ve_log = 'MS43_ClosedLoop_VE.csv';   
+    config.files.excel_filename  = 'MS43_Tuning_Maps.xlsx';
 
-% Fuel Trims
-log_vars.stft_b1    = 'Short Term Fuel Trim Bank 1';
-log_vars.ltft_m_b1  = 'Long Term Fuel Trim Multiplicative Bank 1'; 
-log_vars.stft_b2    = 'Short Term Fuel Trim Bank 2';
-log_vars.ltft_m_b2  = 'Long Term Fuel Trim Multiplicative Bank 2';
+    % --- 1.2 LOGGER VARIABLE NAMES ---
+    config.vars.rpm        = 'Engine Speed';
+    config.vars.map        = 'Manifold Pressure';
+    config.vars.ve_table   = 'Active VE Table';
+    config.vars.load       = 'Engine Load Injection';
+    config.vars.inj        = 'Injection Time Average';  
+    config.vars.full_load  = 'Full Load';
+    
+    config.vars.stft_b1    = 'Short Term Fuel Trim Bank 1';
+    config.vars.ltft_m_b1  = 'Long Term Fuel Trim Multiplicative Bank 1'; 
+    config.vars.stft_b2    = 'Short Term Fuel Trim Bank 2';
+    config.vars.ltft_m_b2  = 'Long Term Fuel Trim Multiplicative Bank 2';
+    
+    config.vars.lambda1    = 'Lambda Control 1';
+    config.vars.lambda2    = 'Lambda Control 2';
 
-% Closed Loop Status
-log_vars.lambda1    = 'Lambda Control 1';
-log_vars.lambda2    = 'Lambda Control 2';
+    % --- 1.3 GLOBAL PARAMETERS ---
+    config.params.min_samples = 2; 
 
-% =========================================================================
-% 1.3 GLOBAL PROCESSING PARAMETERS
-% =========================================================================
-min_samples = 2; % Minimum statistical weight required to output a cell value
+    % --- 1.4 WINOLS MAP AXES ---
+    config.axes.rpm_ve = [320, 704, 992, 1248, 1504, 2016, 2496, 3008, 3500, 4000, 4500, 4992, 5500, 6016, 6500, 7008];
+    config.axes.map_ve = [20.001, 30.001, 40.001, 50.002, 60.002, 70.002, 80.003, 90.003, 100.003, 120.004, 139.996, 159.997, 179.998, 199.998, 219.999, 240.000];
+    config.axes.ve_idx = 1:8; 
 
-% =========================================================================
-% 1.4 WINOLS MAP AXES (Siemens MS43 VE Tables)
-% =========================================================================
-axis_rpm_ve = [320, 704, 992, 1248, 1504, 2016, 2496, 3008, 3500, 4000, 4500, 4992, 5500, 6016, 6500, 7008];
-axis_map_ve = [20.001, 30.001, 40.001, 50.002, 60.002, 70.002, 80.003, 90.003, 100.003, 120.004, 139.996, 159.997, 179.998, 199.998, 219.999, 240.000];
-axis_ve_idx = 1:8; % The 8 VE Tables
+    % --- SAVE TO JSON ---
+    if strcmp(PRESET_MODE, 'save')
+        % Encode to JSON with pretty formatting
+        json_txt = jsonencode(config, 'PrettyPrint', true); 
+        fid = fopen(preset_file, 'w');
+        fwrite(fid, json_txt, 'char');
+        fclose(fid);
+        disp(['*** Successfully saved config to: ', preset_file, ' ***']);
+    end
 
+elseif strcmp(PRESET_MODE, 'load') %#ok<UNRCH>
+    % --- LOAD FROM JSON ---
+    if exist(preset_file, 'file')
+        fid = fopen(preset_file, 'r');
+        raw = fread(fid, inf);
+        str = char(raw');
+        fclose(fid);
+        
+        config = jsondecode(str);
+        disp(['*** Successfully loaded config from: ', preset_file, ' ***']);
+        
+        % Ensure row vectors (JSON sometimes loads arrays as columns)
+        config.axes.rpm_ve = config.axes.rpm_ve(:)';
+        config.axes.map_ve = config.axes.map_ve(:)';
+        config.axes.ve_idx = config.axes.ve_idx(:)';
+    else
+        error(['Preset file not found: ', preset_file]);
+    end
+else %#ok<UNRCH>
+    error('Invalid PRESET_MODE.');
+end
+
+% Extract variables to standard workspace for the execution block
+PROCESS_RAW_LOGS = config.workflow.PROCESS_RAW_LOGS;
+raw_log_folder   = config.files.raw_log_folder;
+filename_log     = config.files.filename_log;
+filename_ve_log  = config.files.filename_ve_log;
+excel_filename   = config.files.excel_filename;
+
+log_vars         = config.vars;
+min_samples      = config.params.min_samples;
+axis_rpm_ve      = config.axes.rpm_ve;
+axis_map_ve      = config.axes.map_ve;
+axis_ve_idx      = config.axes.ve_idx;
+
+%% 2. RAW LOG PROCESSING ENGINE ... (Execution block continues as normal below)
 
 %% 2. RAW LOG PROCESSING ENGINE
 if PROCESS_RAW_LOGS == 1
