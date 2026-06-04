@@ -13,6 +13,14 @@ clear; clc; close all;
 % Hook up the utilities folder
 addpath(fullfile(fileparts(mfilename('fullpath')), 'utils'));
 
+% =========================================================================
+% BOSCH ME7/ME9 MASTER TUNING SUITE
+% =========================================================================
+clear; clc; close all;
+
+% Hook up the utilities folder
+addpath(fullfile(fileparts(mfilename('fullpath')), 'utils'));
+
 %% 1. LOAD TUNING PRESET
 script_dir = fileparts(mfilename('fullpath'));
 if isempty(script_dir), script_dir = pwd; end
@@ -25,19 +33,22 @@ if isequal(preset_name, 0)
     return;
 end
 
-% Read the JSON file natively in one line
+% Read the JSON file natively
 config = jsondecode(fileread(fullfile(preset_path, preset_name)));
 disp(['*** Successfully loaded config from: ', preset_name, ' ***']);
 
-% Extract Workflow & Files
+% --- EXTRACT WORKFLOW & FILES ---
 filename_wot     = config.files.filename_wot;
 filename_full    = config.files.filename_full;
 filename_warmup  = config.files.filename_warmup;
+filename_hot     = config.files.filename_hot;
 excel_filename   = config.files.excel_filename;
+
 PROCESS_RAW_LOGS = config.workflow.PROCESS_RAW_LOGS;
 EXPORT_TO_EXCEL  = config.workflow.EXPORT_TO_EXCEL;
+SHOW_VISUALS     = config.workflow.SHOW_VISUALS;
 
-% Extract Logger Variables & Parameters
+% --- EXTRACT LOGGER VARIABLES & PARAMETERS ---
 log_vars            = config.vars;
 min_samples         = config.params.min_samples;
 min_samples_base_wg = config.params.min_samples_base_wg;
@@ -48,7 +59,54 @@ CWLDIMX             = config.params.CWLDIMX;
 ambient_pressure    = config.params.ambient_pressure;
 safety_margin       = config.params.safety_margin;
 
-% --- Base Maps & Axes extraction (as we set up previously) goes here ---
+% --- EXTRACT WINOLS AXES ---
+% (This prevents the scope/initialization errors you were seeing)
+axis_rpm_boost   = config.axes.rpm_boost;
+axis_boost       = config.axes.boost;
+axis_kfldrl_x    = config.axes.kfldrl_x;
+axis_rpm_kfvp    = config.axes.rpm_kfvp;
+axis_pratio_kfvp = config.axes.pratio_kfvp;
+axis_rpm_fuel    = config.axes.rpm_fuel;
+axis_te          = config.axes.te;
+axis_tmot        = config.axes.tmot;
+axis_rpm_kffwlw  = config.axes.rpm_kffwlw;
+axis_load_kffwlw = config.axes.load_kffwlw;
+axis_rpm_ign     = config.axes.rpm_ign;
+axis_load_ign    = config.axes.load_ign;
+
+% Some math blocks use Absolute Boost instead of Relative Boost
+axis_boost_abs   = axis_boost + ambient_pressure;
+
+% Saugrohrmodell Axes (Fallback to empty if older JSON is used)
+if isfield(config.axes, 'rpm_pbrk'),   axis_rpm_pbrk   = config.axes.rpm_pbrk;   else axis_rpm_pbrk = []; end
+if isfield(config.axes, 'load_pbrk'),  axis_load_pbrk  = config.axes.load_pbrk;  else axis_load_pbrk = []; end
+if isfield(config.axes, 'rpm_pbrknw'), axis_rpm_pbrknw = config.axes.rpm_pbrknw; else axis_rpm_pbrknw = []; end
+if isfield(config.axes, 'load_pbrknw'),axis_load_pbrknw= config.axes.load_pbrknw;else axis_load_pbrknw = []; end
+if isfield(config.axes, 'rpm_prg'),    axis_rpm_prg    = config.axes.rpm_prg;    else axis_rpm_prg = []; end
+if isfield(config.axes, 'vvt_prg'),    axis_vvt_prg    = config.axes.vvt_prg;    else axis_vvt_prg = []; end
+if isfield(config.axes, 'rpm_url'),    axis_rpm_url    = config.axes.rpm_url;    else axis_rpm_url = []; end
+if isfield(config.axes, 'vvt_url'),    axis_vvt_url    = config.axes.vvt_url;    else axis_vvt_url = []; end
+
+% --- EXTRACT BASE MAPS ---
+base_kfldimx = []; base_kfldrl = []; base_kfvp = []; base_fkkvs = []; 
+base_kffwlw = []; base_kfzw = []; base_kfpbrk = []; base_kfpbrknw = []; 
+base_kfprg = []; base_kfurl = [];
+
+if isfield(config, 'base_maps')
+    if isfield(config.base_maps, 'base_kfldimx'),  base_kfldimx  = config.base_maps.base_kfldimx;  end
+    if isfield(config.base_maps, 'base_kfldrl'),   base_kfldrl   = config.base_maps.base_kfldrl;   end
+    if isfield(config.base_maps, 'base_kfvp'),     base_kfvp     = config.base_maps.base_kfvp;     end
+    if isfield(config.base_maps, 'base_fkkvs'),    base_fkkvs    = config.base_maps.base_fkkvs;    end
+    if isfield(config.base_maps, 'base_kffwlw'),   base_kffwlw   = config.base_maps.base_kffwlw;   end
+    if isfield(config.base_maps, 'base_kfzw'),     base_kfzw     = config.base_maps.base_kfzw;     end
+    if isfield(config.base_maps, 'base_kfpbrk'),   base_kfpbrk   = config.base_maps.base_kfpbrk;   end
+    if isfield(config.base_maps, 'base_kfpbrknw'), base_kfpbrknw = config.base_maps.base_kfpbrknw; end
+    if isfield(config.base_maps, 'base_kfprg'),    base_kfprg    = config.base_maps.base_kfprg;    end
+    if isfield(config.base_maps, 'base_kfurl'),    base_kfurl    = config.base_maps.base_kfurl;    end
+end
+
+%% 2. EXECUTION BLOCK
+% (Your original execution code starts exactly here)
 
 %% 2. EXECUTION BLOCK
 
