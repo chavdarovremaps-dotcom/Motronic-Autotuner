@@ -9,6 +9,7 @@
     "filename_wot": "ME_Logs_WOT.csv",
     "filename_full": "ME_Logs_Full.csv",
     "filename_warmup": "ME_Logs_Warmup.csv",
+    "filename_hot": "ME_Logs_Hot.csv",
     "excel_filename": "ME_Tuning_Maps.xlsx"
   },
   "vars": {
@@ -22,7 +23,7 @@
     "load": "rl_w",
     "knock": "wkrm",
     "vvt": "wnwi_w",
-    "tmot": "tmotlin",
+    "tmot": "tmot",
     "pedal": "wped",
     "time": "Time"
   },

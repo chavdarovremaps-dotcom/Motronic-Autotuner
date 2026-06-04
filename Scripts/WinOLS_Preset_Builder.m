@@ -1,21 +1,28 @@
 % =========================================================================
-% WINOLS PRESET BUILDER: 1-Click Extraction (Axes & Base Maps) & Auto-Save
+% WINOLS PRESET BUILDER: Inject Axes & Base Maps into an existing Preset
 % =========================================================================
 clear; clc;
 
-% --- 1. CONFIGURATION & PATH RESOLUTION ---
+% --- 1. PATH RESOLUTION ---
 script_dir = fileparts(mfilename('fullpath'));
 if isempty(script_dir), script_dir = pwd; end
 
 export_folder = fullfile(script_dir, '..', 'ExportsFromWinols');
-preset_folder = fullfile(script_dir, 'Presets');
+preset_folder = fullfile(script_dir, 'presets');
 
-% Hardcode the background template
-base_json_template = fullfile(preset_folder, 'Bosch_ME9_Default.json'); 
+% --- 1A. Select the Target JSON Preset ---
+disp('Waiting for user to select the target JSON preset...');
+[json_file, json_path] = uigetfile(fullfile(preset_folder, '*.json'), '1. Select the JSON Preset to Update');
 
-% --- 1A. Select the WinOLS Data ---
+if isequal(json_file, 0)
+    disp('*** Preset selection canceled. Script stopped. ***');
+    return; 
+end
+target_json_file = fullfile(json_path, json_file);
+
+% --- 1B. Select the WinOLS Data ---
 disp('Waiting for user to select WinOLS export file...');
-[win_file, win_path] = uigetfile(fullfile(export_folder, '*.csv'), 'Select the WinOLS Export File');
+[win_file, win_path] = uigetfile(fullfile(export_folder, '*.csv'), '2. Select the WinOLS Export File');
 
 if isequal(win_file, 0)
     disp('*** File selection canceled. Script stopped. ***');
@@ -44,15 +51,11 @@ disp('=======================================================');
 disp('   WINOLS JSON PRESET BUILDER (AXES & BASE MAPS)');
 disp('=======================================================');
 
-% 1. Read the hidden Base JSON Template
-if ~exist(base_json_template, 'file')
-    error(['Cannot find background template: ', base_json_template]);
-end
-fid = fopen(base_json_template, 'r');
+% 1. Read the Target JSON Preset
+fid = fopen(target_json_file, 'r');
 raw = fread(fid, inf); str = char(raw'); fclose(fid);
 config = jsondecode(str);
 
-% Ensure the base_maps struct exists in the config
 if ~isfield(config, 'base_maps')
     config.base_maps = struct();
 end
@@ -64,6 +67,7 @@ while ~feof(fid)
     lines{end+1} = fgetl(fid); %#ok<SAGROW>
 end
 fclose(fid);
+disp(['Loaded Target JSON: ', json_file]);
 disp(['Loaded WinOLS Data: ', win_file]);
 disp(' ');
 
@@ -80,17 +84,15 @@ for m = 1:size(target_maps, 1)
         current_line = lines{L};
         parts = strsplit(current_line, ';');
         
-        % Check if the line matches our target map
         if length(parts) > 15 && strcmp(strtrim(parts{2}), target_winols_name)
             
             % WinOLS Metadata for Map Dimensions (Columns=14, Rows=15)
             num_cols = str2double(parts{14});
             num_rows = str2double(parts{15});
             
-            % WinOLS Data Strings
-            z_values_str = parts{end-2}; % The flattened Map Data
-            x_values_str = parts{end-1}; % X-Axis
-            y_values_str = parts{end};   % Y-Axis
+            z_values_str = parts{end-2}; 
+            x_values_str = parts{end-1}; 
+            y_values_str = parts{end};   
             
             x_array    = str2num(x_values_str); %#ok<ST2NM>
             y_array    = str2num(y_values_str); %#ok<ST2NM>
@@ -98,12 +100,9 @@ for m = 1:size(target_maps, 1)
             
             if ~isempty(x_array) && ~isempty(y_array) && ~isempty(z_array_1d)
                 
-                % Inject Axes
                 config.axes.(json_x_axis_name) = x_array;
                 config.axes.(json_y_axis_name) = y_array;
                 
-                % Fold the 1D Z-data back into a 2D matrix (WinOLS exports row by row)
-                % We transpose (') the reshape because MATLAB fills columns first naturally
                 try
                     z_matrix = reshape(z_array_1d, [num_cols, num_rows])';
                     config.base_maps.(json_map_name) = z_matrix;
@@ -122,26 +121,21 @@ for m = 1:size(target_maps, 1)
     end
 end
 
-% --- 4. AUTO-SAVE AS NEW FILE ---
+% --- 4. AUTO-SAVE BACK TO SELECTED JSON ---
 disp(' ');
 if maps_updated > 0
-    % Force 1D arrays to be row vectors before saving
+    % Force 1D arrays to be row vectors
     axes_fields = fieldnames(config.axes);
     for i = 1:length(axes_fields)
         config.axes.(axes_fields{i}) = config.axes.(axes_fields{i})(:)';
     end
     
-    % Strip the .csv extension and append .json
-    [~, base_name, ~] = fileparts(win_file);
-    final_output_name = [base_name, '.json'];
-    final_output_file = fullfile(preset_folder, final_output_name);
-    
     json_txt = jsonencode(config, 'PrettyPrint', true); 
-    fid = fopen(final_output_file, 'w');
+    fid = fopen(target_json_file, 'w');
     fwrite(fid, json_txt, 'char');
     fclose(fid);
     
-    disp(['*** Success! Auto-saved ', num2str(maps_updated), ' maps/axes into: ', final_output_name, ' ***']);
+    disp(['*** Success! Injected ', num2str(maps_updated), ' maps/axes into: ', json_file, ' ***']);
 else
-    disp('*** No matching maps found in the WinOLS export. JSON was not generated. ***');
+    disp('*** No matching maps found in the WinOLS export. JSON was not updated. ***');
 end

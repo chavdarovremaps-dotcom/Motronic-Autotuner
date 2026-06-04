@@ -3,26 +3,53 @@
 % =========================================================================
 clear; clc;
 
-% 1. Setup Folder and Files
-log_folder = 'D:\Damos files\Matlab scripts\Volvo S60'; % Location of your RAW logs
+% =========================================================================
+% BOSCH ME7/ME9 LOG PREPARATION UTILITY
+% =========================================================================
+clear; clc; close all;
+
+%% 1. LOAD CONFIGURATION FROM JSON PRESET
+script_dir = fileparts(mfilename('fullpath'));
+if isempty(script_dir), script_dir = pwd; end
+
+disp('Waiting for user to select a JSON preset...');
+[preset_name, preset_path] = uigetfile(fullfile(script_dir, 'presets', '*.json'), 'Select the ECU Tuning Preset');
+
+if isequal(preset_name, 0)
+    disp('*** Preset selection canceled. Script stopped. ***');
+    return;
+end
+
+% Read the JSON file natively
+config = jsondecode(fileread(fullfile(preset_path, preset_name)));
+disp(['*** Successfully loaded config from: ', preset_name, ' ***']);
+
+% --- Map JSON back to Prep Script Variables ---
+log_folder = config.files.raw_log_folder;
 file_pattern = fullfile(log_folder, '*.csv');
 csv_files = dir(file_pattern);
 
-% --- LOGGING VARIABLE NAMES & FILTER SETTINGS ---
-filter_vars.pedal      = 'wped';   % Pedal position column name
-filter_thresh.wot_min  = 95;         % Minimum pedal % to be considered WOT
+% Filter Settings
+filter_vars.pedal      = config.vars.pedal; 
+filter_thresh.wot_min  = config.prep.wot_min;         
+filter_vars.temp       = config.vars.tmot;     
+filter_thresh.temp_max = config.prep.temp_max;        
 
-filter_vars.temp       = 'tmot';     % Coolant temperature column name
-filter_thresh.temp_max = 80;         % Maximum temp (C) to be considered Warm-up
+% Time Alignment Settings
+ALIGN_TIMESTAMPS = config.prep.ALIGN_TIMESTAMPS;           
+time_col_name    = config.vars.time; 
 
-% --- TIME ALIGNMENT SETTINGS ---
-ALIGN_TIMESTAMPS = 1;           % 1 = Make time continuous across merged logs
-time_col_name    = 'Time'; % Your logger's exact time header
+% 5120mbar Hack Toggle
+HACK_5120        = config.prep.HACK_5120; 
+pressure_columns = config.prep.pressure_columns;
 
-% --- 5120mbar Hack Toggle ---
-HACK_5120 = 0; % 1 = Multiply logged pressures by 2 (for 3/4-bar MAP sensors)
-pressure_columns = {'pvdks_w', 'pu', 'pssol_w', 'pvdk_w', 'plgru_w'};
+% File Outputs (for downstream saving)
+filename_wot     = config.files.filename_wot;    
+filename_full    = config.files.filename_full;   
+filename_warmup  = config.files.filename_warmup;
+filename_hot     = config.files.filename_hot;
 
+%% 2. EXECUTION BLOCK ... (Keep your existing log merging logic below)
 
 %% 2. EXECUTION BLOCK
 % Initialize empty tables and our global time offset tracker
@@ -162,7 +189,7 @@ end
 
 % --- CLEAR OLD FILES ---
 disp('Cleaning up old CSV files...');
-old_files = {'ME9_Logs_Full.csv', 'ME9_Logs_WOT.csv', 'ME9_Logs_Warmup.csv', 'ME9_Logs_Hot.csv'};
+old_files = {filename_full, filename_wot, filename_warmup, filename_hot};
 for i = 1:length(old_files)
     target_file = fullfile(script_dir, old_files{i});
     if exist(target_file, 'file')
@@ -172,25 +199,25 @@ end
 
 % --- SAVE NEW FILES ---
 if ~isempty(Master_Log_Full)
-    output_path_full = fullfile(script_dir, 'ME9_Logs_Full.csv');
+    output_path_full = fullfile(script_dir, filename_full);
     writetable(Master_Log_Full, output_path_full);
     disp(['Success! Saved FULL data to:   ', output_path_full]);
 end
 
 if ~isempty(Master_Log_WOT)
-    output_path_wot = fullfile(script_dir, 'ME9_Logs_WOT.csv');
+    output_path_wot = fullfile(script_dir, filename_wot);
     writetable(Master_Log_WOT, output_path_wot);
     disp(['Success! Saved WOT data to:    ', output_path_wot]);
 end
 
 if ~isempty(Master_Log_Warmup)
-    output_path_warmup = fullfile(script_dir, 'ME9_Logs_Warmup.csv');
+    output_path_warmup = fullfile(script_dir, filename_warmup);
     writetable(Master_Log_Warmup, output_path_warmup);
     disp(['Success! Saved WARMUP data to: ', output_path_warmup]);
 end
 
 if ~isempty(Master_Log_Hot)
-    output_path_hot = fullfile(script_dir, 'ME9_Logs_Hot.csv');
+    output_path_hot = fullfile(script_dir, filename_hot);
     writetable(Master_Log_Hot, output_path_hot);
     disp(['Success! Saved HOT data to:    ', output_path_hot]);
 end

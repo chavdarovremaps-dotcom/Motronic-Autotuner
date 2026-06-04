@@ -13,6 +13,7 @@ config.files.raw_log_folder   = 'D:\Damos files\Matlab scripts\Volvo S60';
 config.files.filename_wot     = 'ME_Logs_WOT.csv';    
 config.files.filename_full    = 'ME_Logs_Full.csv';   
 config.files.filename_warmup  = 'ME_Logs_Warmup.csv'; 
+config.files.filename_hot     = 'ME_Logs_Hot.csv';
 config.files.excel_filename   = 'ME_Tuning_Maps.xlsx';
 
 % --- LOGGER VARIABLE NAMES ---
@@ -26,7 +27,7 @@ config.vars.ltft    = 'fra_w';
 config.vars.load    = 'rl_w';        
 config.vars.knock   = 'wkrm';        
 config.vars.vvt     = 'wnwi_w';      
-config.vars.tmot    = 'tmotlin'; 
+config.vars.tmot    = 'tmot'; 
 config.vars.pedal   = 'wped';
 config.vars.time    = 'Time';    
 
