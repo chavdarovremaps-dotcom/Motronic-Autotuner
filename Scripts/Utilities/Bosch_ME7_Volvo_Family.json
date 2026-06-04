@@ -5,10 +5,11 @@
     "SHOW_VISUALS": 0
   },
   "files": {
-    "filename_wot": "ME9_Logs_WOT.csv",
-    "filename_full": "ME9_Logs_Full.csv",
-    "filename_warmup": "ME9_Logs_Warmup.csv",
-    "excel_filename": "ME7_ME9_Tuning_Maps.xlsx"
+    "raw_log_folder": "D:\\Damos files\\Matlab scripts\\Volvo S60",
+    "filename_wot": "ME_Logs_WOT.csv",
+    "filename_full": "ME_Logs_Full.csv",
+    "filename_warmup": "ME_Logs_Warmup.csv",
+    "excel_filename": "ME_Tuning_Maps.xlsx"
   },
   "vars": {
     "rpm": "nmot_w",
@@ -21,7 +22,22 @@
     "load": "rl_w",
     "knock": "wkrm",
     "vvt": "wnwi_w",
-    "tmot": "tmotlin"
+    "tmot": "tmotlin",
+    "pedal": "wped",
+    "time": "Time"
+  },
+  "prep": {
+    "wot_min": 95,
+    "temp_max": 80,
+    "ALIGN_TIMESTAMPS": 1,
+    "HACK_5120": 0,
+    "pressure_columns": [
+      "pvdks_w",
+      "pu",
+      "pssol_w",
+      "pvdk_w",
+      "plgru_w"
+    ]
   },
   "params": {
     "min_samples": 2,
