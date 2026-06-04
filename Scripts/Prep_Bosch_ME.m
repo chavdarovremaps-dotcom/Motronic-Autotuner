@@ -49,8 +49,65 @@ filename_full    = config.files.filename_full;
 filename_warmup  = config.files.filename_warmup;
 filename_hot     = config.files.filename_hot;
 
-%% 2. EXECUTION BLOCK ... (Keep your existing log merging logic below)
+%% 2. EXECUTION BLOCK
+disp('--- STARTING RAW DATA EXTRACTION & VALIDATION ---');
+if isempty(csv_files)
+    error(['No CSV files found in: ', log_folder]);
+end
 
+Master_Log = table();
+
+for i = 1:length(csv_files)
+    file_path = fullfile(csv_files(i).folder, csv_files(i).name);
+    
+    % TunerPro Header Bypass & Load
+    fid = fopen(file_path, 'r'); line1 = fgetl(fid); fclose(fid);
+    if contains(line1, 'TunerPro')
+        opts = detectImportOptions(file_path, 'NumHeaderLines', 1);
+    else
+        opts = detectImportOptions(file_path);
+    end
+    opts.VariableNamingRule = 'preserve'; 
+    current_log = readtable(file_path, opts);
+    if height(current_log) > 0, current_log(end, :) = []; end
+    
+    % =========================================================================
+    % PRE-FLIGHT CHECK: Missing Variable Detector (Runs only on the first file)
+    % =========================================================================
+    if i == 1
+        actual_log_columns = current_log.Properties.VariableNames;
+        expected_json_vars = struct2cell(config.vars);
+        missing_vars = {};
+        
+        for v = 1:length(expected_json_vars)
+            var_name = expected_json_vars{v};
+            % Check if the variable exists in the CSV headers
+            if ~ismember(var_name, actual_log_columns)
+                missing_vars{end+1} = var_name; %#ok<SAGROW>
+            end
+        end
+        
+        if ~isempty(missing_vars)
+            disp('=======================================================');
+            disp(' !!! WARNING: MISSING VARIABLES IN RAW LOGS !!!');
+            disp('=======================================================');
+            disp('The following variables defined in your JSON preset');
+            disp('were NOT found in your TunerPro CSV files:');
+            disp(' ');
+            for m = 1:length(missing_vars)
+                disp(['   - [ ', missing_vars{m}, ' ]']);
+            end
+            disp('=======================================================');
+            disp('The script will attempt to continue, but downstream math may fail.');
+            disp(' ');
+        else
+            disp('SUCCESS: All required JSON variables found in the raw logs!');
+            disp(' ');
+        end
+    end
+end   
+    % --- Your existing Log Merging / Time Alignment logic goes here ---
+    % ...
 %% 2. EXECUTION BLOCK
 % Initialize empty tables and our global time offset tracker
 Master_Log_Full   = table();
@@ -177,21 +234,26 @@ if ALIGN_TIMESTAMPS == 1 && ismember(time_col_name, all_vars)
 end
 
 % =========================================================================
-% SAVE OUTPUTS TO THE SCRIPT'S LOCAL DIRECTORY
+% SAVE OUTPUTS TO THE PREPARED LOGS DIRECTORY
 % =========================================================================
 disp(' ');
-
 % Dynamically find the folder where this script is saved
 script_dir = fileparts(mfilename('fullpath'));
 if isempty(script_dir)
     script_dir = pwd; % Fallback
 end
 
+% --- CREATE PreparedLogs FOLDER ---
+prep_out_dir = fullfile(script_dir, 'PreparedLogs');
+if ~exist(prep_out_dir, 'dir')
+    mkdir(prep_out_dir);
+end
+
 % --- CLEAR OLD FILES ---
-disp('Cleaning up old CSV files...');
+disp('Cleaning up old CSV files in PreparedLogs folder...');
 old_files = {filename_full, filename_wot, filename_warmup, filename_hot};
 for i = 1:length(old_files)
-    target_file = fullfile(script_dir, old_files{i});
+    target_file = fullfile(prep_out_dir, old_files{i});
     if exist(target_file, 'file')
         delete(target_file);
     end
@@ -199,27 +261,27 @@ end
 
 % --- SAVE NEW FILES ---
 if ~isempty(Master_Log_Full)
-    output_path_full = fullfile(script_dir, filename_full);
+    output_path_full = fullfile(prep_out_dir, filename_full);
     writetable(Master_Log_Full, output_path_full);
-    disp(['Success! Saved FULL data to:   ', output_path_full]);
+    disp(['Success! Saved FULL data to:   PreparedLogs\', filename_full]);
 end
 
 if ~isempty(Master_Log_WOT)
-    output_path_wot = fullfile(script_dir, filename_wot);
+    output_path_wot = fullfile(prep_out_dir, filename_wot);
     writetable(Master_Log_WOT, output_path_wot);
-    disp(['Success! Saved WOT data to:    ', output_path_wot]);
+    disp(['Success! Saved WOT data to:    PreparedLogs\', filename_wot]);
 end
 
 if ~isempty(Master_Log_Warmup)
-    output_path_warmup = fullfile(script_dir, filename_warmup);
+    output_path_warmup = fullfile(prep_out_dir, filename_warmup);
     writetable(Master_Log_Warmup, output_path_warmup);
-    disp(['Success! Saved WARMUP data to: ', output_path_warmup]);
+    disp(['Success! Saved WARMUP data to: PreparedLogs\', filename_warmup]);
 end
 
 if ~isempty(Master_Log_Hot)
-    output_path_hot = fullfile(script_dir, filename_hot);
+    output_path_hot = fullfile(prep_out_dir, filename_hot);
     writetable(Master_Log_Hot, output_path_hot);
-    disp(['Success! Saved HOT data to:    ', output_path_hot]);
+    disp(['Success! Saved HOT data to:    PreparedLogs\', filename_hot]);
 end
 
 if ALIGN_TIMESTAMPS == 1
@@ -229,6 +291,8 @@ if HACK_5120 == 1
     disp('*** NOTE: 5120mbar Hack was ENABLED. All pressure values were multiplied by 2. ***');
 end
 
+disp(' ');
+disp('Master Prep Execution Complete. You can now run Tuner_Bosch_ME.m!');
 
 %% ========================================================================
 % HELPER FUNCTIONS

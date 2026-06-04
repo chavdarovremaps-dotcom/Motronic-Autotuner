@@ -38,6 +38,7 @@ target_maps = {
     'KFVPDKSD', 'rpm_kfvp',   'pratio_kfvp', 'base_kfvp';
     'FKKVS',    'rpm_fuel',   'te',          'base_fkkvs';
     'KFFWLW',   'rpm_kffwlw', 'load_kffwlw', 'base_kffwlw';
+    'KFFWL',    'rpm_kffwl',  'tmot',        'base_kffwl';    
     'KFZW',     'rpm_ign',    'load_ign',    'base_kfzw';
     'KFPBRK',   'rpm_pbrk',   'load_pbrk',   'base_kfpbrk';
     'KFPBRKNW', 'rpm_pbrknw', 'load_pbrknw', 'base_kfpbrknw';
@@ -48,7 +49,7 @@ target_maps = {
 %% --- 3. EXECUTION BLOCK ---
 disp(' ');
 disp('=======================================================');
-disp('   WINOLS JSON PRESET BUILDER (AXES & BASE MAPS)');
+disp('   WINOLS JSON PRESET BUILDER (SMART MATCH ENGINE)');
 disp('=======================================================');
 
 % 1. Read the Target JSON Preset
@@ -73,8 +74,10 @@ disp(' ');
 
 % 3. Search and Extract Axes & Base Maps
 maps_updated = 0;
+total_targets = size(target_maps, 1);
+found_flags = false(total_targets, 1); % NEW: Track which maps we find
 
-for m = 1:size(target_maps, 1)
+for m = 1:total_targets
     target_winols_name = target_maps{m, 1};
     json_y_axis_name   = target_maps{m, 2};
     json_x_axis_name   = target_maps{m, 3};
@@ -84,45 +87,66 @@ for m = 1:size(target_maps, 1)
         current_line = lines{L};
         parts = strsplit(current_line, ';');
         
-        if length(parts) > 15 && strcmp(strtrim(parts{2}), target_winols_name)
+        if length(parts) > 15 
+            map_name = strtrim(parts{2});
+            is_match = strcmp(map_name, target_winols_name) || startsWith(map_name, [target_winols_name, '_']);
             
-            % WinOLS Metadata for Map Dimensions (Columns=14, Rows=15)
-            num_cols = str2double(parts{14});
-            num_rows = str2double(parts{15});
-            
-            z_values_str = parts{end-2}; 
-            x_values_str = parts{end-1}; 
-            y_values_str = parts{end};   
-            
-            x_array    = str2num(x_values_str); %#ok<ST2NM>
-            y_array    = str2num(y_values_str); %#ok<ST2NM>
-            z_array_1d = str2num(z_values_str); %#ok<ST2NM>
-            
-            if ~isempty(x_array) && ~isempty(y_array) && ~isempty(z_array_1d)
+            if is_match
+                found_flags(m) = true; % Mark as found!
                 
-                config.axes.(json_x_axis_name) = x_array;
-                config.axes.(json_y_axis_name) = y_array;
+                num_cols = str2double(parts{14});
+                num_rows = str2double(parts{15});
                 
-                try
-                    z_matrix = reshape(z_array_1d, [num_cols, num_rows])';
-                    config.base_maps.(json_map_name) = z_matrix;
-                    
-                    disp(['SUCCESS: Extracted axes & map data for [ ', target_winols_name, ' ]']);
-                    maps_updated = maps_updated + 1;
-                catch
-                    disp(['WARNING: [ ', target_winols_name, ' ] size mismatch. Expected ', num2str(num_rows), 'x', num2str(num_cols)]);
+                z_values_str = parts{end-2}; 
+                x_values_str = parts{end-1}; 
+                y_values_str = parts{end};   
+                
+                x_array    = str2num(x_values_str); %#ok<ST2NM>
+                y_array    = str2num(y_values_str); %#ok<ST2NM>
+                z_array_1d = str2num(z_values_str); %#ok<ST2NM>
+                
+                if isempty(y_array) && num_rows == 1
+                    y_array = 0; 
                 end
                 
-            else
-                disp(['WARNING: Found [ ', target_winols_name, ' ] but data fields were empty.']);
+                if ~isempty(x_array) && ~isempty(y_array) && ~isempty(z_array_1d)
+                    config.axes.(json_x_axis_name) = x_array;
+                    config.axes.(json_y_axis_name) = y_array;
+                    
+                    try
+                        z_matrix = reshape(z_array_1d, [num_cols, num_rows])';
+                        config.base_maps.(json_map_name) = z_matrix;
+                        
+                        disp(['SUCCESS: Extracted data for [ ', map_name, ' ] mapped to -> ', target_winols_name]);
+                        maps_updated = maps_updated + 1;
+                    catch
+                        disp(['WARNING: [ ', map_name, ' ] size mismatch. Expected ', num2str(num_rows), 'x', num2str(num_cols)]);
+                    end
+                else
+                    disp(['WARNING: Found [ ', map_name, ' ] but data fields were empty.']);
+                end
+                break; 
             end
-            break; 
         end
     end
 end
 
-% --- 4. AUTO-SAVE BACK TO SELECTED JSON ---
+% --- 4. MISSING MAP SUMMARY (NEW) ---
 disp(' ');
+if any(~found_flags)
+    disp('=======================================================');
+    disp(' !!! WARNING: THE FOLLOWING MAPS WERE MISSING !!!');
+    disp('=======================================================');
+    for m = 1:total_targets
+        if ~found_flags(m)
+            disp(['   - ', target_maps{m, 1}]);
+        end
+    end
+    disp('=======================================================');
+    disp(' ');
+end
+
+% --- 5. AUTO-SAVE BACK TO SELECTED JSON ---
 if maps_updated > 0
     % Force 1D arrays to be row vectors
     axes_fields = fieldnames(config.axes);

@@ -17,9 +17,9 @@ config.files.filename_hot     = 'ME_Logs_Hot.csv';
 config.files.excel_filename   = 'ME_Tuning_Maps.xlsx';
 
 % --- LOGGER VARIABLE NAMES ---
-config.vars.rpm     = 'nmot_w';      
+config.vars.rpm     = 'nmot';      
 config.vars.wgdc    = 'ldtvm';       
-config.vars.boost   = 'pvdks_w';     
+config.vars.boost   = 'pvdkds_w';     
 config.vars.pu      = 'pu';          
 config.vars.inj     = 'tevfakge_w';  
 config.vars.stft    = 'frm_w';       
