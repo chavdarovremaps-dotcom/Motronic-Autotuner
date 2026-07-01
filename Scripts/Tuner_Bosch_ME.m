@@ -91,6 +91,8 @@ if isfield(config, 'base_maps')
     if isfield(config.base_maps, 'base_kfpbrknw'), base_kfpbrknw = config.base_maps.base_kfpbrknw; end
     if isfield(config.base_maps, 'base_kfprg'),    base_kfprg    = config.base_maps.base_kfprg;    end
     if isfield(config.base_maps, 'base_kfurl'),    base_kfurl    = config.base_maps.base_kfurl;    end
+    if isfield(config.params, 'vvt_enabled'), vvt_enabled = config.params.vvt_enabled; else, vvt_enabled = 1; end
+    if isfield(config.params, 'vvt_threshold'), vvt_threshold = config.params.vvt_threshold; else, vvt_threshold = 15; end
 end
 
 % =========================================================================
@@ -143,7 +145,7 @@ Base_Pressure_Curve=[]; KFVPDKSD_Map=[];
 FKKVS_Map=[]; FKKVS_Counts=[]; 
 KFZW_Map=[]; KFZW2_Map=[]; KFZW_Counts=[]; KFZW2_Counts=[];
 KFFWL_Map=[]; KFFWL_Counts=[]; KFFWLW_Map=[]; KFFWLW_Counts=[]; FKKVS_RL_Map=[];
-KFURL_Map=[]; KFPRG_Map=[]; Saugrohr_Counts=[];
+KFURL_Map=[]; KFPRG_Map=[]; Saugrohr_Counts=[];axis_vvt_out=[];
 disp(' ');
 
 % --- Run Boost Calibration ---
@@ -194,11 +196,12 @@ if READY_IGN && ~isempty(data_full)
 end
 
 % --- Run Intake Manifold Model ---
-if READY_SAUGROHR && ~isempty(data_wot)
+if READY_SAUGROHR && ~isempty(data_full)
     disp('--- STARTING INTAKE MANIFOLD CALIBRATION ---');
     try
-        [KFURL_Map, KFPRG_Map, Saugrohr_Counts] = GenerateSaugrohrmodell(data_wot, axis_rpm_url, axis_vvt_url, base_kfurl, base_kfprg, log_vars, min_samples);
-        disp('Successfully recalculated 2D KFURL and KFPRG via Linear Regression.');
+        % NOTICE: Now passing data_full so the math has part-throttle data to draw a line!
+        [KFURL_Map, KFPRG_Map, Saugrohr_Counts, axis_vvt_out] = GenerateSaugrohrmodell(data_full, axis_rpm_url, log_vars, min_samples, vvt_enabled, vvt_threshold);
+        disp('Successfully calculated pure binary VVT Saugrohrmodell data.');
     catch ME
         disp(['Saugrohr Map Error: ', ME.message]); 
     end
@@ -212,7 +215,7 @@ if EXPORT_TO_EXCEL == 1
                          KFFWL_Map, KFFWL_Counts, KFFWLW_Map, KFFWLW_Counts, FKKVS_RL_Map, ...
                          FKKVS_Map, FKKVS_Counts, KFZW_Map, KFZW_Counts, KFZW2_Map, KFZW2_Counts, ...
                          KFURL_Map, KFPRG_Map, Saugrohr_Counts, ... 
-                         axis_rpm_boost, axis_boost, axis_boost_abs, axis_kfldrl_x, axis_rpm_kfvp, axis_pratio_kfvp, axis_tmot, axis_load_kffwlw, axis_rpm_kffwlw, axis_rpm_fuel, axis_te, axis_rpm_ign, axis_load_ign, axis_rpm_url, axis_vvt_url);
+                         axis_rpm_boost, axis_boost, axis_boost_abs, axis_kfldrl_x, axis_rpm_kfvp, axis_pratio_kfvp, axis_tmot, axis_load_kffwlw, axis_rpm_kffwlw, axis_rpm_fuel, axis_te, axis_rpm_ign, axis_load_ign, axis_rpm_url, axis_vvt_out);
     disp(['Success! Maps saved to: ', excel_filename]);
 end
 disp('Master Suite Execution Complete.');

@@ -1,13 +1,22 @@
-function [KFURL_Map, KFPRG_Map, Points_Count] = GenerateSaugrohrmodell(data, axis_rpm, axis_vvt, base_kfurl, base_kfprg, log_vars, min_samples)
+function [KFURL_Map, KFPRG_Map, Points_Count, axis_vvt_out] = GenerateSaugrohrmodell(data, axis_rpm, log_vars, min_samples, vvt_enabled, vvt_threshold)
     % =========================================================================
-    % SAUGROHRMODELL CALIBRATION (2D Linear Regression)
+    % SAUGROHRMODELL CALIBRATION (Strict Binary VVT Regression)
     % Layout: RPM (Y-Axis / Rows) x VVT (X-Axis / Columns)
     % =========================================================================
     
-    KFURL_Map = base_kfurl;
-    KFPRG_Map = base_kfprg;
-    Points_Count = zeros(length(axis_rpm), length(axis_vvt)); 
+    % 1. Force the Digital VVT Axis
+    if vvt_enabled == 1
+        axis_vvt_out = [0, vvt_threshold]; % Strictly 2 Columns (OFF and ON)
+    else
+        axis_vvt_out = [0];                % Strictly 1 Column (Disabled)
+    end
     
+    % 2. Pre-allocate pure NaN maps (No factory fallback)
+    KFURL_Map = NaN(length(axis_rpm), length(axis_vvt_out));
+    KFPRG_Map = NaN(length(axis_rpm), length(axis_vvt_out));
+    Points_Count = zeros(length(axis_rpm), length(axis_vvt_out)); 
+    
+    % 3. Extract Data columns
     rpm_col = log_vars.rpm;
     load_col = log_vars.load;
     ps_col = log_vars.ps_w; 
@@ -21,14 +30,14 @@ function [KFURL_Map, KFPRG_Map, Points_Count] = GenerateSaugrohrmodell(data, axi
     load_data = data.(load_col);
     ps_data = data.(ps_col);
     
-    if ~ismember(vvt_col, data.Properties.VariableNames)
-        disp(['  [INFO] VVT column (', vvt_col, ') not found. Assuming 0 cam angle.']);
+    if ~ismember(vvt_col, data.Properties.VariableNames) || vvt_enabled == 0
+        disp(['  [INFO] VVT Disabled or missing. Forcing single-column calculation.']);
         vvt_data = zeros(height(data), 1);
     else
         vvt_data = data.(vvt_col);
     end
     
-    % 3. Iterate through RPM (Rows) and VVT (Columns)
+    % 4. Iterate through RPM (Rows) and strict Binary VVT (Columns)
     for r = 1:length(axis_rpm)
         target_rpm = axis_rpm(r);
         
@@ -37,13 +46,21 @@ function [KFURL_Map, KFPRG_Map, Points_Count] = GenerateSaugrohrmodell(data, axi
         else, rpm_min = (axis_rpm(r-1) + axis_rpm(r)) / 2; rpm_max = (axis_rpm(r) + axis_rpm(r+1)) / 2;
         end
         
-        for c = 1:length(axis_vvt)
-            target_vvt = axis_vvt(c);
+        for c = 1:length(axis_vvt_out)
             
-            if length(axis_vvt) == 1, vvt_min = -100; vvt_max = 100; 
-            elseif c == 1, vvt_min = target_vvt - 10; vvt_max = (axis_vvt(c) + axis_vvt(c+1)) / 2;
-            elseif c == length(axis_vvt), vvt_min = (axis_vvt(c-1) + axis_vvt(c)) / 2; vvt_max = target_vvt + 10;
-            else, vvt_min = (axis_vvt(c-1) + axis_vvt(c)) / 2; vvt_max = (axis_vvt(c) + axis_vvt(c+1)) / 2;
+            % Strict ON/OFF Routing based on column index
+            if vvt_enabled == 1
+                if c == 1 % VVT OFF Column (0)
+                    vvt_min = -inf;
+                    vvt_max = vvt_threshold;
+                else      % VVT ON Column (Threshold value)
+                    vvt_min = vvt_threshold;
+                    vvt_max = inf;
+                end
+            else
+                % VVT Disabled Catch-All
+                vvt_min = -inf;
+                vvt_max = inf;
             end
             
             idx = rpm_data >= rpm_min & rpm_data < rpm_max & vvt_data >= vvt_min & vvt_data < vvt_max;
@@ -56,15 +73,22 @@ function [KFURL_Map, KFPRG_Map, Points_Count] = GenerateSaugrohrmodell(data, axi
             
             Points_Count(r, c) = length(bin_ps);
             
-            if length(bin_ps) >= min_samples && (max(bin_ps) - min(bin_ps)) > 200
+            % Regression Engine
+            % Regression Engine
+            if length(bin_ps) >= min_samples && (max(bin_ps) - min(bin_ps)) > 20
                 p = polyfit(bin_ps, bin_load, 1);
                 m = p(1); 
                 b = p(2); 
                 x_intercept = -b / m; 
                 
-                if m > 0 && x_intercept >= 0 && x_intercept <= 400
+                % RELAXED PHYSICS BOUNDS: Allow up to 800hPa backpressure
+                if m > 0 && x_intercept >= -50 && x_intercept <= 800
                     KFURL_Map(r, c) = m;
                     KFPRG_Map(r, c) = x_intercept;
+                else
+                    % Print exactly what impossible numbers it tried to calculate
+                    disp(['  [REJECTED] RPM: ', num2str(target_rpm), ' | VVT: ', num2str(target_vvt), ...
+                          ' | Slope: ', num2str(round(m,5)), ' | Intercept (PRG): ', num2str(round(x_intercept,1))]);
                 end
             end
         end

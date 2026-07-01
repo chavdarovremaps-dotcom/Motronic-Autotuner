@@ -8,8 +8,37 @@ function ExportAllMapsToExcel(filename, KFLDIMX_Map, KFLDRL_Map, KFLDRL_Counts, 
 % ========================================================================    
 output_cells = {};
     
-    function add_linked_maps_to_sheet(title_str1, map_data1, title_str2, map_data2, x_axis, y_axis, secondary_x_label, secondary_x_data)
+function add_linked_maps_to_sheet(title_str1, map_data1, title_str2, map_data2, x_axis, y_axis, secondary_x_label, secondary_x_data)
         if isempty(map_data1), return; end
+        
+        % =================================================================
+        % BULLETPROOF DIMENSION ALIGNMENT
+        % Auto-transposes or pads matrices to prevent array bound crashes
+        % =================================================================
+        if size(map_data1, 1) ~= length(y_axis) || size(map_data1, 2) ~= length(x_axis)
+            % Check if it just needs to be flipped
+            if size(map_data1, 1) == length(x_axis) && size(map_data1, 2) == length(y_axis)
+                map_data1 = map_data1';
+                if nargin > 3 && ~isempty(map_data2), map_data2 = map_data2'; end
+            else
+                % If sizes are completely mismatched, safely resize to prevent crash
+                new_map1 = NaN(length(y_axis), length(x_axis));
+                r_max = min(size(map_data1, 1), length(y_axis));
+                c_max = min(size(map_data1, 2), length(x_axis));
+                new_map1(1:r_max, 1:c_max) = map_data1(1:r_max, 1:c_max);
+                map_data1 = new_map1;
+                
+                if nargin > 3 && ~isempty(map_data2)
+                    new_map2 = NaN(length(y_axis), length(x_axis));
+                    r_max2 = min(size(map_data2, 1), length(y_axis));
+                    c_max2 = min(size(map_data2, 2), length(x_axis));
+                    new_map2(1:r_max2, 1:c_max2) = map_data2(1:r_max2, 1:c_max2);
+                    map_data2 = new_map2;
+                end
+            end
+        end
+        % =================================================================
+
         start_row = size(output_cells, 1) + 1; gap_cols = 2; col_offset = length(x_axis) + 1 + gap_cols; 
         
         output_cells{start_row, 1} = title_str1;
@@ -34,9 +63,9 @@ output_cells = {};
             if iscell(y_axis) || isstring(y_axis), data_row1{1} = char(y_axis(r)); else, data_row1{1} = y_axis(r); end
             data_row2 = data_row1; 
             for c = 1:length(x_axis)
-                if isnan(map_data1(r,c)), data_row1{c+1} = ''; else, data_row1{c+1} = round(map_data1(r,c), 3); end
+                if isnan(map_data1(r,c)), data_row1{c+1} = ''; else, data_row1{c+1} = round(map_data1(r,c), 5); end
                 if nargin > 3 && ~isempty(map_data2)
-                    if isnan(map_data2(r,c)), data_row2{c+1} = ''; else, data_row2{c+1} = round(map_data2(r,c), 3); end
+                    if isnan(map_data2(r,c)), data_row2{c+1} = ''; else, data_row2{c+1} = round(map_data2(r,c), 5); end
                 end
             end
             output_cells(current_r, 1:length(data_row1)) = data_row1;

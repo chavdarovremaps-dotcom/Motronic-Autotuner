@@ -9,7 +9,7 @@ config.workflow.PROCESS_RAW_LOGS = 1;
 config.workflow.EXPORT_TO_EXCEL  = 1; 
 config.workflow.SHOW_VISUALS     = 0; 
 
-config.files.raw_log_folder   = 'D:\Damos files\Matlab scripts\Volvo S60';
+config.files.raw_log_folder   = 'C:\Users\chavd\OneDrive\Desktop\_Files\audi a4 1.8t 470cc 518aa ecu, ebay turbo for calib';
 config.files.filename_wot     = 'ME_Logs_WOT.csv';    
 config.files.filename_full    = 'ME_Logs_Full.csv';   
 config.files.filename_warmup  = 'ME_Logs_Warmup.csv'; 
@@ -17,9 +17,9 @@ config.files.filename_hot     = 'ME_Logs_Hot.csv';
 config.files.excel_filename   = 'ME_Tuning_Maps.xlsx';
 
 % --- LOGGER VARIABLE NAMES ---
-config.vars.rpm     = 'nmot';      
+config.vars.rpm     = 'nmot_w';      
 config.vars.wgdc    = 'ldtvm';       
-config.vars.boost   = 'pvdkds_w';     
+config.vars.boost   = 'pvdks_w';     
 config.vars.pu      = 'pu';          
 config.vars.inj     = 'tevfakge_w';  
 config.vars.stft    = 'frm_w';       
@@ -27,14 +27,14 @@ config.vars.ltft    = 'fra_w';
 config.vars.load    = 'rl_w';        
 config.vars.knock   = 'wkrm';        
 config.vars.vvt     = 'wnwi_w';      
-config.vars.tmot    = 'tmot'; 
-config.vars.pedal   = 'wped';
+config.vars.tmot    = 'tmotlin'; 
+config.vars.pedal   = 'wped_w';
 config.vars.ps_w    = 'ps_w';
-config.vars.time    = 'Time';
+config.vars.time    = 'TimeStamp';
 
 
 % --- PREP & FILTER SETTINGS ---
-config.prep.wot_min          = 95; 
+config.prep.wot_min          = 70; 
 config.prep.temp_max         = 80;
 config.prep.ALIGN_TIMESTAMPS = 1;
 config.prep.HACK_5120        = 0;
@@ -46,7 +46,7 @@ config.params.min_samples_base_wg = 2;
 config.params.trim_format         = 0;          
 config.params.axis_wgdc_splat     = 0:5:95;     
 config.params.FILL_MISSING_DATA   = 0;          
-config.params.CWLDIMX             = 0;          
+config.params.CWLDIMX             = 1;          
 config.params.ambient_pressure    = 1000;       
 config.params.safety_margin       = 0;  
 
