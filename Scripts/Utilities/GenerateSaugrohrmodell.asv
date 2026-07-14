@@ -73,38 +73,15 @@ function [KFURL_Map, KFPRG_Map, Points_Count, axis_vvt_out] = GenerateSaugrohrmo
             
             Points_Count(r, c) = length(bin_ps);
             
-            % =========================================================================
-            % --- SMART REGRESSION ENGINE (WITH HIGH-RPM ANCHORING) ---
-            % =========================================================================
+            % Regression Engine
+            % Regression Engine
             if length(bin_ps) >= min_samples && (max(bin_ps) - min(bin_ps)) > 20
-                
-                % 1. Run the initial standard regression
                 p = polyfit(bin_ps, bin_load, 1);
                 m = p(1); 
                 b = p(2); 
                 x_intercept = -b / m; 
                 
-                % 2. Catch the Extrapolation Trap (Negative KFPRG)
-                if x_intercept < 0
-                    
-                    % Keep the original values for the notification
-                    orig_intercept = x_intercept;
-                    orig_slope = m;
-                    
-                    % Apply the Anchor: Force KFPRG to a safe, positive physical value
-                    x_intercept = 20; 
-                    
-                    % Recalculate the slope (KFURL) originating from our 20 hPa anchor,
-                    % passing exactly through the center of mass of our WOT data cluster.
-                    m = mean(bin_load) / (mean(bin_ps) - x_intercept);
-                    
-                    % Notify the user in the console
-                    disp(['  [ANCHOR APPLIED] RPM: ', num2str(target_rpm), ' | VVT: ', num2str(target_vvt), ...
-                          ' | KFPRG was ', num2str(round(orig_intercept,1)), ' -> Anchored to 20 hPa. ', ...
-                          'KFURL recalculated from ', num2str(round(orig_slope,4)), ' to ', num2str(round(m,4))]);
-                end
-                
-                % 3. RELAXED PHYSICS BOUNDS (Sanity Check)
+                % RELAXED PHYSICS BOUNDS: Allow up to 800hPa backpressure
                 if m > 0 && x_intercept >= -200 && x_intercept <= 800
                     KFURL_Map(r, c) = m;
                     KFPRG_Map(r, c) = x_intercept;
@@ -114,7 +91,6 @@ function [KFURL_Map, KFPRG_Map, Points_Count, axis_vvt_out] = GenerateSaugrohrmo
                           ' | Slope: ', num2str(round(m,5)), ' | Intercept (PRG): ', num2str(round(x_intercept,1))]);
                 end
             end
-            % =========================================================================
         end
     end
 end
