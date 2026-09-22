@@ -97,7 +97,7 @@ def test_timing_removal_steps():
     pull = np.array([[np.nan, 0.0, 0.1, 0.375, 0.4, 0.75, 0.76, 1.5]])
     np.testing.assert_allclose(timing_removal(pull, 0.375), [[0, 0, 0.375, 0.375, 0.75, 0.75, 1.125, 1.5]])
     # a floor leaves leaked slivers alone
-    np.testing.assert_allclose(timing_removal(np.array([0.001, 0.05, 0.2]), 0.375, min_pull=0.05), [0, 0.375, 0.375])
+    np.testing.assert_allclose(timing_removal(np.array([0.001, 0.1, 0.2]), 0.375, min_pull=0.1), [0, 0.375, 0.375])
 
 
 def test_knock_removal_on_ignition_map(tmp_path):
@@ -120,7 +120,45 @@ def test_knock_removal_on_ignition_map(tmp_path):
     by = {m.key: m for m in maps}
     removal = by["iga_removal"].values
     assert removal[2, 2] == pytest.approx(0.75) and removal[0, 0] == pytest.approx(1.125)
-    assert removal[1, 1] == 0.0 and 0 < by["knock_avg"].values[1, 1] < 0.05
+    assert removal[1, 1] == 0.0 and 0 < by["knock_avg"].values[1, 1] < 0.1
     assert by["iga_corrected"].values[2, 2] == 19.25
     assert by["iga_corrected"].values[1, 1] == 20.0
     assert by["knock_avg"].values[2, 2] == pytest.approx(0.4)
+
+
+def test_wideband_ve_error(tmp_path):
+    from motronic_autotuner.generators.ve_3d import generate_ve_corrections, wideband_afr
+    rng = np.random.default_rng(4)
+    n = 800
+    volts = np.full(n, (15.0 - 7.35) * 5 / 15.04)      # controller reads AFR 15.0
+    volts[:20] = 0.0                                    # sensor not ready: at the rail
+    data = pd.DataFrame({
+        V["rpm"]: rng.uniform(1000, 6000, n), V["map"]: rng.uniform(20, 120, n), V["ve_table"]: 1.0,
+        V["wideband_v"]: volts, V["afr_target"]: 14.7,
+        V["lambda1"]: 0.0, V["lambda2"]: 0.0,          # open loop the whole time: trims would give nothing
+    })
+    msgs = []
+    maps = generate_ve_corrections(data, V, min_samples=1, axis_rpm=AXIS_RPM, axis_map=AXIS_MAP,
+                                   base_maps={1: np.full((16, 16), 0.6)}, source="wideband", messages=msgs)
+    by = {m.key: m for m in maps}
+    err = by["ve1"].values
+    assert by["ve1"].title == "VE Table 1 VE Error from Wideband (%)"
+    np.testing.assert_allclose(err[~np.isnan(err)], (15.0 / 14.7 - 1) * 100)   # lean -> positive
+    fixed = by["ve1_corrected"].values
+    np.testing.assert_allclose(fixed[~np.isnan(err)], 0.6 * 15.0 / 14.7)
+    assert any("Using 780 rows" in m for m in msgs)
+    np.testing.assert_allclose(wideband_afr(np.array([0.0, 5.0])), [7.35, 22.39])
+
+
+def test_vanos_limp_home_warning(tmp_path):
+    write_tunerpro_log(tmp_path / "a.csv", n=100)
+    text = (tmp_path / "a.csv").read_text(encoding="latin-1").splitlines()
+    text[1] += ",VANOS Limp Home"
+    text[2] += ","
+    for i in range(3, len(text)):
+        text[i] += ",ON" if 10 <= i < 15 else ",OFF"
+    (tmp_path / "a.csv").write_text("\n".join(text) + "\n", encoding="latin-1")
+    preset = SIEMENS_MS43.default_preset()
+    logs = SIEMENS_MS43.ingest(tmp_path, preset)
+    assert len(logs.warnings) == 1 and "VANOS Limp Home was ON in 5 of 100 rows" in logs.warnings[0]
+    assert any("[WARNING]" in m for m in logs.messages)

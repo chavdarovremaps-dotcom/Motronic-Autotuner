@@ -136,6 +136,25 @@ class RunResult:
 
 PostProcess = Callable[[RunContext, RunResult], None]
 
+IngestCheck = Callable[[SplitLogs, Preset], list[str]]
+"""Runs after ingestion; returns warnings to show the user, e.g. a limp-home flag that was ON."""
+
+
+def flag_was_on(channel: str, label: str) -> IngestCheck:
+    """An ingest check that warns when an ON/OFF channel was ever ON in the imported logs."""
+
+    def check(logs: SplitLogs, preset: Preset) -> list[str]:
+        col = preset.var(channel)
+        if not col or col not in logs.full.columns:
+            return []
+        on = int((logs.full[col] == 1).sum())
+        if on == 0:
+            return []
+        share = 100.0 * on / max(len(logs.full), 1)
+        return [f"{label} was ON in {on} of {len(logs.full)} rows ({share:.1f} %). The data is compromised."]
+
+    return check
+
 
 @dataclass
 class Family:
@@ -151,6 +170,7 @@ class Family:
     map_importer: MapImporter = WINOLS_IMPORTER
     post_process: list[PostProcess] = field(default_factory=list)
     """Run after all generators, e.g. the 5120 scaling of KFURL and KFPRG."""
+    ingest_checks: list[IngestCheck] = field(default_factory=list)
     extra_tabs: list[type] = field(default_factory=list)
     default_prep: dict[str, Any] = field(default_factory=dict)
     show_pressure_hack: bool = True
@@ -211,10 +231,15 @@ class Family:
     def ingest(self, folder: str | Path, preset: Preset) -> SplitLogs:
         source = self.log_source(preset.log_source)
         required = [preset.var(ch) for ch in source.required_channels if preset.var(ch)]
-        return process_raw_logs(
+        logs = process_raw_logs(
             folder, preset, self.ingest_settings(preset), list(source.hooks),
             reader=source.reader, fuzzy_columns=source.fuzzy_columns, required_columns=required or None,
         )
+        for check in self.ingest_checks:
+            for warning in check(logs, preset):
+                logs.warnings.append(warning)
+                logs.messages.append(f"[WARNING] {warning}")
+        return logs
 
     def import_maps(self, preset: Preset) -> ImportResult:
         """Run the family's map importer with the paths stored in ``preset.files``."""

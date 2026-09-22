@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from ..core.winols import TargetMap
 from ..generators.ignition_knock import DEFAULT_MIN_PULL, DEFAULT_STEP, generate_knock_removal
-from ..generators.ve_3d import generate_ve_corrections
-from .base import XDF_IMPORTER, Family, GeneratorSpec, LogSource, ParamSpec, RunContext
+from ..generators.ve_3d import (
+    SOURCE_TRIMS, SOURCE_WIDEBAND, WIDEBAND_GAIN, WIDEBAND_OFFSET, generate_ve_corrections,
+)
+from .base import XDF_IMPORTER, Family, GeneratorSpec, LogSource, ParamSpec, RunContext, flag_was_on
 
 VE_TABLES = 8
 IGNITION_MAP = "ip_iga_ron98_pl__n__maf"
@@ -31,6 +33,9 @@ DEFAULT_VARS = {
     "ltft_m_b2": "Long Term Fuel Trim Multiplicative Bank 2",
     "lambda1": "Lambda Control 1",
     "lambda2": "Lambda Control 2",
+    "wideband_v": "Downstream Lambda Sensor Input Bank 1",
+    "afr_target": "Air Fuel Ratio Target",
+    "vanos_limp": "VANOS Limp Home",
     "full_load": "Full Load",
     "pedal": "Accelerator Pedal Position",
     "tmot": "Coolant Temperature",
@@ -51,6 +56,9 @@ VAR_LABELS = {
     "ltft_m_b2": "LTFT multiplicative bank 2",
     "lambda1": "Lambda control bank 1",
     "lambda2": "Lambda control bank 2",
+    "wideband_v": "Wideband analog input (V)",
+    "afr_target": "AFR target",
+    "vanos_limp": "VANOS limp home flag",
     "full_load": "Full load flag",
     "pedal": "Pedal position",
     "tmot": "Coolant temp",
@@ -61,6 +69,11 @@ DEFAULT_PREP = {"align_timestamps": True, "hack_5120": False, "pressure_columns"
 
 PARAMS = [
     ParamSpec("min_samples", "Min samples per cell", "int", 2, group="VE Correction", minimum=0),
+    ParamSpec("use_wideband", "VE error from wideband AFR on the analog input (instead of STFT + LTFT)", "bool",
+              False, group="VE Correction"),
+    ParamSpec("wideband_gain", "Wideband AFR = V x gain / 5 + offset:  gain", "float", WIDEBAND_GAIN,
+              group="VE Correction", decimals=3, minimum=0),
+    ParamSpec("wideband_offset", "Wideband offset", "float", WIDEBAND_OFFSET, group="VE Correction", decimals=3),
     ParamSpec("knock_min_samples", "Min samples per cell", "int", 1, group="Ignition Knock Removal", minimum=0),
     ParamSpec("knock_step", "Timing step (deg)", "float", DEFAULT_STEP, group="Ignition Knock Removal",
               decimals=3, minimum=0.001),
@@ -84,6 +97,9 @@ def _ve(ctx: RunContext):
         min_samples=float(ctx.p("min_samples", 2)),
         axis_rpm=p.axis("rpm_ve"), axis_map=p.axis("map_ve"),
         n_tables=VE_TABLES, base_maps={k: b for k, b in bases.items() if b is not None},
+        source=SOURCE_WIDEBAND if ctx.p("use_wideband", False) else SOURCE_TRIMS,
+        wideband_gain=float(ctx.p("wideband_gain", WIDEBAND_GAIN)),
+        wideband_offset=float(ctx.p("wideband_offset", WIDEBAND_OFFSET)),
         messages=ctx.messages,
     )
 
@@ -115,6 +131,7 @@ SIEMENS_MS43 = Family(
                       required_base_maps=("base_iga",)),
     ],
     map_importer=XDF_IMPORTER,
+    ingest_checks=[flag_was_on("vanos_limp", "VANOS Limp Home")],
     default_prep=DEFAULT_PREP,
     show_pressure_hack=False,
     excel_sheet="MS43 VE Maps",

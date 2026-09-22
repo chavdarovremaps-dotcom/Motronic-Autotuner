@@ -33,6 +33,8 @@ class SplitLogs:
     warmup: pd.DataFrame = field(default_factory=pd.DataFrame)
     hot: pd.DataFrame = field(default_factory=pd.DataFrame)
     messages: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    """Findings the user must see, e.g. a limp-home flag was ON during the log."""
 
     def subset(self, name: str) -> pd.DataFrame:
         return getattr(self, name)

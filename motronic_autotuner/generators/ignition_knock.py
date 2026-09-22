@@ -17,7 +17,7 @@ from ..core.splatting import bilinear
 from . import column
 
 DEFAULT_STEP = 0.375
-DEFAULT_MIN_PULL = 0.05
+DEFAULT_MIN_PULL = 0.1
 EPS = 1e-9
 
 

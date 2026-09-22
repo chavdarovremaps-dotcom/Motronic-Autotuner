@@ -133,5 +133,9 @@ class IngestionTab(QWidget):
             backup_note,
             "Ready for Calibration Math.",
         )
-        self.lamp.set_state("ok" if counts["full"] else "warn")
+        if logs.warnings:
+            self.lamp.set_state("warn")
+            QMessageBox.warning(self, "Check the logs", "\n\n".join(logs.warnings))
+        else:
+            self.lamp.set_state("ok" if counts["full"] else "warn")
         self.logs_ready.emit()
