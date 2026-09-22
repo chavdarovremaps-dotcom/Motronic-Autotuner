@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -11,7 +12,8 @@ import pandas as pd
 from ..core.logs import IngestSettings, PrepHook, SplitLogs, process_raw_logs, read_logger_csv
 from ..core.maps import CalibrationMap
 from ..core.preset import Preset
-from ..core.winols import TargetMap
+from ..core.winols import ImportResult, TargetMap, parse_export
+from ..core.xdf import import_xdf_maps
 
 
 @dataclass(frozen=True)
@@ -32,12 +34,52 @@ class ParamSpec:
 
 @dataclass(frozen=True)
 class LogSource:
-    """Where logs come from: a reader and the prep hooks applied to each file."""
+    """Where logs come from: a reader, the prep hooks applied to each file, and cleaning rules."""
 
     key: str
     label: str
     reader: Callable[[Path], pd.DataFrame] = read_logger_csv
     hooks: tuple[PrepHook, ...] = ()
+    fuzzy_columns: bool = False
+    """Match logger columns case-insensitively or by substring (TunerPro exports)."""
+    required_channels: tuple[str, ...] = ()
+    """Drop rows with NaN only in these channels; empty means any NaN drops the row."""
+
+
+@dataclass(frozen=True)
+class FileInput:
+    key: str
+    """Stored under ``preset.files[key]``."""
+    label: str
+    filter: str
+
+
+@dataclass(frozen=True)
+class MapImporter:
+    """How a family gets its axes and factory maps: a WinOLS export, or an XDF plus binary."""
+
+    kind: str
+    label: str
+    inputs: tuple[FileInput, ...]
+    run: Callable[[dict[str, str], list[TargetMap]], ImportResult]
+
+
+WINOLS_IMPORTER = MapImporter(
+    kind="winols",
+    label="Import WinOLS CSV Export",
+    inputs=(FileInput("winols_csv", "WinOLS CSV export", "CSV export (*.csv);;All files (*)"),),
+    run=lambda paths, targets: parse_export(paths["winols_csv"], targets),
+)
+
+XDF_IMPORTER = MapImporter(
+    kind="xdf",
+    label="Import maps from XDF + binary",
+    inputs=(
+        FileInput("xdf", "TunerPro XDF definition", "XDF definition (*.xdf);;All files (*)"),
+        FileInput("bin", "Binary file", "Binary (*.bin *.ori *.hex *.rom);;All files (*)"),
+    ),
+    run=lambda paths, targets: import_xdf_maps(paths["xdf"], paths["bin"], targets),
+)
 
 
 @dataclass
@@ -102,10 +144,15 @@ class Family:
     target_maps: list[TargetMap]
     log_sources: list[LogSource]
     generators: list[GeneratorSpec]
+    map_importer: MapImporter = WINOLS_IMPORTER
     post_process: list[PostProcess] = field(default_factory=list)
     """Run after all generators, e.g. the 5120 scaling of KFURL and KFPRG."""
     extra_tabs: list[type] = field(default_factory=list)
     default_prep: dict[str, Any] = field(default_factory=dict)
+    show_pressure_hack: bool = True
+    """Show the 5120 mbar hack controls on the profile tab."""
+    excel_sheet: str = "Tuning Maps"
+    excel_default_name: str = "ME_Tuning_Maps.xlsx"
 
     # ---- presets ----------------------------------------------------------
 
@@ -120,7 +167,7 @@ class Family:
             "filename_full": "ME_Logs_Full.csv",
             "filename_warmup": "ME_Logs_Warmup.csv",
             "filename_hot": "ME_Logs_Hot.csv",
-            "excel_filename": "ME_Tuning_Maps.xlsx",
+            "excel_filename": self.excel_default_name,
         }
         if self.log_sources:
             p.log_source = self.log_sources[0].key
@@ -147,17 +194,31 @@ class Family:
     # ---- pipeline ---------------------------------------------------------
 
     def ingest_settings(self, preset: Preset) -> IngestSettings:
+        """Rates default to infinity (no transient filter) when the family declares no such parameter."""
         p = preset.params
+        declared = {spec.key for spec in self.params}
         return IngestSettings(
-            max_rpm_roc=float(p.get("max_rpm_roc", 1000)),
-            max_pedal_roc=float(p.get("max_throttle_roc", 33)),
+            max_rpm_roc=float(p.get("max_rpm_roc", 1000 if "max_rpm_roc" in declared else math.inf)),
+            max_pedal_roc=float(p.get("max_throttle_roc", 33 if "max_throttle_roc" in declared else math.inf)),
             wot_min=float(p.get("wot_min", 70)),
             temp_max=float(p.get("temp_max", 80)),
         )
 
     def ingest(self, folder: str | Path, preset: Preset) -> SplitLogs:
         source = self.log_source(preset.log_source)
-        return process_raw_logs(folder, preset, self.ingest_settings(preset), list(source.hooks))
+        required = [preset.var(ch) for ch in source.required_channels if preset.var(ch)]
+        return process_raw_logs(
+            folder, preset, self.ingest_settings(preset), list(source.hooks),
+            reader=source.reader, fuzzy_columns=source.fuzzy_columns, required_columns=required or None,
+        )
+
+    def import_maps(self, preset: Preset) -> ImportResult:
+        """Run the family's map importer with the paths stored in ``preset.files``."""
+        paths = {inp.key: str(preset.files.get(inp.key, "")) for inp in self.map_importer.inputs}
+        missing = [inp.label for inp in self.map_importer.inputs if not paths[inp.key]]
+        if missing:
+            raise FileNotFoundError("Missing file: " + ", ".join(missing))
+        return self.map_importer.run(paths, self.target_maps)
 
     def run_all(self, preset: Preset, logs: SplitLogs) -> RunResult:
         ctx = RunContext(preset=preset, logs=logs)
@@ -176,7 +237,8 @@ class Family:
                 continue
             for m in maps:
                 result.maps.append(m)
-                result.rows.append(StatusRow(m.title, "Calculated", m.shape_label(), m.key))
+                status = "No data" if (m.skip_if_empty and m.all_nan) else "Calculated"
+                result.rows.append(StatusRow(m.title, status, m.shape_label(), m.key))
         for hook in self.post_process:
             hook(ctx, result)
         return result

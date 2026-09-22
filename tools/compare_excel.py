@@ -17,13 +17,13 @@ GAP_COLS = 2
 
 
 def read_blocks(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray | None]]:
-    ws = load_workbook(path, data_only=True)["Tuning Maps"]
+    ws = load_workbook(path, data_only=True).worksheets[0]
     rows = [list(r) for r in ws.iter_rows(values_only=True)]
     blocks = {}
     r = 0
     while r < len(rows):
         title = rows[r][0]
-        if isinstance(title, str) and title and r + 1 < len(rows) and rows[r + 1][0] == "Y-Axis \\ X-Axis":
+        if isinstance(title, str) and title and r + 1 < len(rows) and _is_corner(rows[r + 1][0]):
             header = rows[r + 1]
             nx = 0
             for v in header[1:]:
@@ -46,6 +46,11 @@ def read_blocks(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray | None]]:
         else:
             r += 1
     return blocks
+
+
+def _is_corner(v) -> bool:
+    """The header row's first cell: 'Y-Axis \\ X-Axis', 'MAP \\ RPM' and the like."""
+    return isinstance(v, str) and "\\" in v
 
 
 def compare(name: str, a: np.ndarray | None, b: np.ndarray | None, tol: float) -> bool:

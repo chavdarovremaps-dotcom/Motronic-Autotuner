@@ -69,3 +69,13 @@ def test_process_raw_logs_no_files(tmp_path):
     except FileNotFoundError:
         return
     raise AssertionError("expected FileNotFoundError")
+
+
+def test_required_columns_keep_rows_with_other_nans(tmp_path):
+    p = tmp_path / "t.csv"
+    p.write_text("TunerPro log\nTimeStamp,nmot_w,wdkba,tmotlin,extra\n0,1000,10,90,\n0.1,1100,10,90,5\n0.2,1200,10,90,\n0.3,,10,90,1\n0.4,1300,10,90,2\n")
+    preset = BOSCH_ME7.default_preset()
+    logs = process_raw_logs(tmp_path, preset, IngestSettings(max_rpm_roc=float("inf"), max_pedal_roc=float("inf")),
+                            required_columns=["nmot_w"])
+    # last row dropped as incomplete tail, one row dropped for NaN rpm, NaN in 'extra' kept
+    assert logs.counts()["full"] == 3

@@ -20,14 +20,16 @@ pip install -e .[dev]
 ## Run
 
 ```bash
-python -m motronic_autotuner.apps.me7
+python -m motronic_autotuner.apps.me7     # Bosch ME7, maps from a WinOLS export
+python -m motronic_autotuner.apps.ms43    # Siemens MS43 (MS4X firmware), maps from XDF + bin
 ```
 
 Workflow, tab by tab:
 
 1. **ECU Profile**: load a profile JSON or start from the defaults, check the
-   logger column names, then import the WinOLS CSV export to pull in axes and
-   factory maps. Click a map row to view it.
+   logger column names, then import the maps to pull in axes and factory
+   values: a WinOLS CSV export for Bosch families, the TunerPro XDF plus the
+   car's binary for MS43. Click a map row to view it.
 2. **Data Ingestion & Filtering**: pick the folder of raw logs, adjust the
    parameters, and import. Logs are transient-filtered, time-aligned and
    split into Full, WOT, Warmup and Hot.
@@ -40,8 +42,8 @@ open them.
 
 | Package | Holds |
 | --- | --- |
-| `core/` | splatting, log ingestion, WinOLS parser, preset JSON, Excel export |
-| `generators/` | the math per calibration area: boost, handover, warmup, fuel, ignition, manifold |
+| `core/` | splatting, log ingestion, WinOLS parser, XDF + bin reader, preset JSON, Excel export |
+| `generators/` | the math per calibration area: boost, handover, warmup, fuel, ignition, manifold, closed-loop VE |
 | `families/` | one module per ECU family: defaults, target maps, log sources, generator list |
 | `gui/` | PySide6 window and the three standard tabs, built from the family declaration |
 | `apps/` | one entry script per executable |

@@ -28,6 +28,16 @@ class CalibrationMap:
     secondary_x: np.ndarray | None = None
     """An extra header row under the x axis, e.g. physical boost targets for KFLDRL."""
 
+    corner_label: str = "Y-Axis \\ X-Axis"
+    """Text in the header row's first cell, e.g. ``"MAP \\ RPM"``."""
+
+    skip_if_empty: bool = False
+    """Leave the map out of the Excel file when every cell is NaN."""
+
+    @property
+    def all_nan(self) -> bool:
+        return self.is_empty or bool(np.isnan(np.asarray(self.values, dtype=float)).all())
+
     def as_2d(self) -> np.ndarray:
         return np.atleast_2d(np.asarray(self.values, dtype=float))
 

@@ -102,7 +102,7 @@ class CalculateTab(QWidget):
         result = self.state.result
         if result is None or not result.maps:
             return
-        default = str(Path(self.state.log_folder or ".") / DEFAULT_EXCEL_NAME)
+        default = str(Path(self.state.log_folder or ".") / (self.family.excel_default_name or DEFAULT_EXCEL_NAME))
         path, _ = QFileDialog.getSaveFileName(self, "Save Calculated Maps to Excel", default, "Excel (*.xlsx)")
         if not path:
             QMessageBox.information(self, "Notice", "Calculation complete, but Excel export was canceled.")
@@ -110,7 +110,7 @@ class CalculateTab(QWidget):
         if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
         try:
-            export_maps(path, result.maps)
+            export_maps(path, result.maps, sheet=self.family.excel_sheet)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Excel Export Error: {exc}")
             return
@@ -140,6 +140,8 @@ class CalculateTab(QWidget):
 def _color(status: str) -> QColor:
     if status == "Calculated":
         return QColor("#c8f7c5")
+    if status == "No data":
+        return QColor("#e0e0e0")
     if status.startswith("Error"):
         return QColor("#f8c8c8")
     return QColor("#ffe0b2")

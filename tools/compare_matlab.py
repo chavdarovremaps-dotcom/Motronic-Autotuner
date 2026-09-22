@@ -24,13 +24,13 @@ from motronic_autotuner.families.bosch_me7 import BOSCH_ME7  # noqa: E402
 
 
 def read_blocks(path: Path) -> dict[str, np.ndarray]:
-    ws = load_workbook(path, data_only=True)["Tuning Maps"]
+    ws = load_workbook(path, data_only=True).worksheets[0]
     rows = list(ws.iter_rows(values_only=True))
     blocks: dict[str, np.ndarray] = {}
     r = 0
     while r < len(rows):
         title = rows[r][0]
-        if isinstance(title, str) and title and rows[r + 1][0] == "Y-Axis \\ X-Axis":
+        if isinstance(title, str) and title and isinstance(rows[r + 1][0], str) and "\\" in rows[r + 1][0]:
             header = rows[r + 1]
             # the counts twin shares this row further right; count only the contiguous x cells
             nx = 0

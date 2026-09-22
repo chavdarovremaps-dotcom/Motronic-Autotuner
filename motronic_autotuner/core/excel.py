@@ -45,7 +45,7 @@ def export_maps(path: str | Path, maps: list[CalibrationMap], sheet: str = "Tuni
     row = 1
 
     for m in maps:
-        if m.is_empty:
+        if m.is_empty or (m.skip_if_empty and m.all_nan):
             continue
         x_axis = np.asarray(m.x_axis, dtype=float).ravel()
         y_labels = m.y_labels()
@@ -59,9 +59,9 @@ def export_maps(path: str | Path, maps: list[CalibrationMap], sheet: str = "Tuni
             ws.cell(row=row, column=1 + col_offset, value=m.counts_title or f"{m.title} - SAMPLE WEIGHTS")
         row += 1
 
-        _write_row(ws, row, 1, ["Y-Axis \\ X-Axis", *[float(v) for v in x_axis]])
+        _write_row(ws, row, 1, [m.corner_label, *[float(v) for v in x_axis]])
         if counts is not None:
-            _write_row(ws, row, 1 + col_offset, ["Y-Axis \\ X-Axis", *[float(v) for v in x_axis]])
+            _write_row(ws, row, 1 + col_offset, [m.corner_label, *[float(v) for v in x_axis]])
         row += 1
 
         if m.secondary_x is not None and np.asarray(m.secondary_x).size:
