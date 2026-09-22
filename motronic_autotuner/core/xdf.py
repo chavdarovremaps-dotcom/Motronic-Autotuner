@@ -45,6 +45,12 @@ def evaluate(equation: str, x: np.ndarray) -> np.ndarray:
     return np.asarray(ev(tree), dtype=float)
 
 
+FLAG_SIGNED = 0x01
+FLAG_LSB_FIRST = 0x02
+FLAG_COLUMN_MAJOR = 0x04
+FLAG_FLOAT = 0x10000
+
+
 @dataclass
 class Embedded:
     address: int | None
@@ -54,6 +60,8 @@ class Embedded:
     signed: bool
     lsb_first: bool
     equation: str = "X"
+    column_major: bool = False
+    is_float: bool = False
 
 
 @dataclass
@@ -62,6 +70,7 @@ class Axis:
     count: int
     units: str = ""
     labels: list[float] | None = None
+    text_labels: list[str] | None = None
     link_id: str | None = None
     embedded: Embedded | None = None
 
@@ -119,7 +128,13 @@ class Xdf:
             axis = Axis(id=ax.get("id", ""), count=int(_text(ax, "indexcount") or "0"), units=_text(ax, "units"))
             labels = ax.findall("LABEL")
             if labels:
-                axis.labels = [float(l.get("value", "0")) for l in sorted(labels, key=lambda l: int(l.get("index", "0")))]
+                ordered = sorted(labels, key=lambda l: int(l.get("index", "0")))
+                axis.text_labels = [l.get("value", "") for l in ordered]
+                try:
+                    axis.labels = [float(s) for s in axis.text_labels]
+                except ValueError:
+                    # text labels such as "Map 1": the axis is positional
+                    axis.labels = [float(i) for i in range(len(ordered))]
             link = ax.find("embedinfo")
             if link is not None and link.get("type") == "3" and link.get("linkobjid"):
                 axis.link_id = link.get("linkobjid").lower()
@@ -134,9 +149,11 @@ class Xdf:
                     element_bits=int(emb.get("mmedelementsizebits", str(self.default_bits))),
                     rows=int(emb.get("mmedrowcount", "1") or 1),
                     cols=int(emb.get("mmedcolcount", "1") or 1),
-                    signed=bool(flags & 0x01) or (flags == 0 and self.default_signed),
-                    lsb_first=bool(flags & 0x02) if flags else self.default_lsb_first,
+                    signed=bool(flags & FLAG_SIGNED) or (flags == 0 and self.default_signed),
+                    lsb_first=bool(flags & FLAG_LSB_FIRST) if flags else self.default_lsb_first,
                     equation=equation,
+                    column_major=bool(flags & FLAG_COLUMN_MAJOR),
+                    is_float=bool(flags & FLAG_FLOAT),
                 )
             t.axes[axis.id] = axis
         return t
@@ -154,11 +171,18 @@ class Xdf:
         if emb.address is None:
             raise ValueError("axis has no address")
         n = emb.rows * emb.cols
-        dtype = {8: "i1" if emb.signed else "u1", 16: ("<" if emb.lsb_first else ">") + ("i2" if emb.signed else "u2"),
-                 32: ("<" if emb.lsb_first else ">") + ("i4" if emb.signed else "u4")}[emb.element_bits]
+        order = "<" if emb.lsb_first else ">"
+        if emb.is_float:
+            dtype = order + {32: "f4", 64: "f8"}[emb.element_bits]
+        else:
+            dtype = {8: "i1" if emb.signed else "u1", 16: order + ("i2" if emb.signed else "u2"),
+                     32: order + ("i4" if emb.signed else "u4")}[emb.element_bits]
         offset = self._file_offset(emb.address)
         raw = np.frombuffer(data, dtype=dtype, count=n, offset=offset).astype(float)
-        return evaluate(emb.equation, raw).reshape(emb.rows, emb.cols)
+        values = evaluate(emb.equation, raw)
+        if emb.column_major:
+            return values.reshape(emb.cols, emb.rows).T.copy()
+        return values.reshape(emb.rows, emb.cols)
 
     def read_axis(self, data: bytes, axis: Axis) -> np.ndarray:
         if axis.link_id:

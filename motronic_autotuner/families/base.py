@@ -271,3 +271,11 @@ class Family:
         for hook in self.post_process:
             hook(ctx, result)
         return result
+
+
+def mhd_log_source(required_channels: tuple[str, ...] = ("rpm",)) -> LogSource:
+    """MHD Flasher CSV logs: comment header, units in the column names, converted to bar and degrees C."""
+    from ..core.mhd import read_mhd_csv
+
+    return LogSource("mhd", "MHD Flasher CSV", reader=read_mhd_csv, fuzzy_columns=True,
+                     required_channels=required_channels)
