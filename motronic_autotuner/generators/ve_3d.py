@@ -49,9 +49,13 @@ def generate_ve_corrections(
     axis_rpm: np.ndarray,
     axis_map: np.ndarray,
     n_tables: int = 8,
+    base_maps: dict[int, np.ndarray] | None = None,
     messages: list[str] | None = None,
 ) -> list[CalibrationMap]:
+    """``base_maps`` maps a table index to its factory VE values ``[len(axis_map), len(axis_rpm)]``;
+    for every table with data a corrected copy, ``base * (1 + correction / 100)``, is added."""
     messages = messages if messages is not None else []
+    base_maps = base_maps or {}
     axis_rpm = np.asarray(axis_rpm, dtype=float).ravel()
     axis_map = np.asarray(axis_map, dtype=float).ravel()
     axis_idx = np.arange(1, n_tables + 1, dtype=float)
@@ -75,9 +79,22 @@ def generate_ve_corrections(
     )
     out = []
     for z in range(n_tables):
+        corr = maps3d[:, :, z]
         out.append(CalibrationMap(
-            f"ve{z + 1}", f"VE Table {z + 1} Correction (%)", maps3d[:, :, z], axis_rpm, axis_map,
+            f"ve{z + 1}", f"VE Table {z + 1} Correction (%)", corr, axis_rpm, axis_map,
             counts=counts3d[:, :, z], counts_title=f"VE Table {z + 1} - SAMPLE WEIGHTS",
             corner_label="MAP \\ RPM", skip_if_empty=True,
+        ))
+        base = base_maps.get(z + 1)
+        if base is None or np.isnan(corr).all():
+            continue
+        base = np.asarray(base, dtype=float)
+        if base.shape != corr.shape:
+            messages.append(f"VE Table {z + 1}: base map is {base.shape}, correction is {corr.shape}; not corrected.")
+            continue
+        corrected = np.where(np.isnan(corr), base, base * (1.0 + corr / 100.0))
+        out.append(CalibrationMap(
+            f"ve{z + 1}_corrected", f"VE Table {z + 1} Corrected (paste into TunerPro)", corrected,
+            axis_rpm, axis_map, corner_label="MAP \\ RPM",
         ))
     return out

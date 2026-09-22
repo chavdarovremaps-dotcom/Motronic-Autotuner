@@ -1,23 +1,29 @@
 """Siemens MS43 with the MS4X custom firmware, tuned in TunerPro RT.
 
 Maps come from the TunerPro XDF plus the car's binary instead of a WinOLS
-export. Logs are TunerPro RT CSVs with ON/OFF flag columns. The one
-generator is the closed-loop VE correction from Scripts/MS43_Tune_helper.m.
+export. Logs are TunerPro RT CSVs with ON/OFF flag columns. Two
+generators: the closed-loop VE correction from Scripts/MS43_Tune_helper.m,
+with paste-ready corrected VE tables, and knock-based timing removal on the
+RON98 part/full load ignition map.
 """
 
 from __future__ import annotations
 
 from ..core.winols import TargetMap
+from ..generators.ignition_knock import DEFAULT_STEP, generate_knock_removal
 from ..generators.ve_3d import generate_ve_corrections
 from .base import XDF_IMPORTER, Family, GeneratorSpec, LogSource, ParamSpec, RunContext
 
 VE_TABLES = 8
+IGNITION_MAP = "ip_iga_ron98_pl__n__maf"
 
 DEFAULT_VARS = {
     "rpm": "Engine Speed",
     "map": "Manifold Pressure",
     "ve_table": "Active VE Table",
     "load": "Engine Load Injection",
+    "load_ign": "Engine Load Ignition",
+    "knock": "Knock Correction Average",
     "inj": "Injection Time Average",
     "stft_b1": "Short Term Fuel Trim Bank 1",
     "ltft_m_b1": "Long Term Fuel Trim Multiplicative Bank 1",
@@ -35,7 +41,9 @@ VAR_LABELS = {
     "rpm": "Engine speed",
     "map": "Manifold pressure",
     "ve_table": "Active VE table",
-    "load": "Load",
+    "load": "Load (injection)",
+    "load_ign": "Load (ignition)",
+    "knock": "Knock correction average",
     "inj": "Injection time",
     "stft_b1": "STFT bank 1",
     "ltft_m_b1": "LTFT multiplicative bank 1",
@@ -53,21 +61,40 @@ DEFAULT_PREP = {"align_timestamps": True, "hack_5120": False, "pressure_columns"
 
 PARAMS = [
     ParamSpec("min_samples", "Min samples per cell", "int", 2, group="VE Correction", minimum=0),
+    ParamSpec("knock_min_samples", "Min samples per cell", "int", 1, group="Ignition Knock Removal", minimum=0),
+    ParamSpec("knock_step", "Timing step (deg)", "float", DEFAULT_STEP, group="Ignition Knock Removal",
+              decimals=3, minimum=0.001),
 ]
 
 TARGET_MAPS = [
     TargetMap(f"ip_map_ve_{i}__map__n", "map_ve", "rpm_ve", f"base_ve_{i}", "Volumetric Efficiency", direct=True)
     for i in range(1, VE_TABLES + 1)
+] + [
+    TargetMap(IGNITION_MAP, "rpm_iga", "maf_iga", "base_iga", "Ignition Timing", direct=True),
 ]
 
 
 def _ve(ctx: RunContext):
     p = ctx.preset
+    bases = {i: p.base_map(f"base_ve_{i}") for i in range(1, VE_TABLES + 1)}
     return generate_ve_corrections(
         ctx.logs.full, p.vars,
         min_samples=float(ctx.p("min_samples", 2)),
         axis_rpm=p.axis("rpm_ve"), axis_map=p.axis("map_ve"),
-        n_tables=VE_TABLES, messages=ctx.messages,
+        n_tables=VE_TABLES, base_maps={k: b for k, b in bases.items() if b is not None},
+        messages=ctx.messages,
+    )
+
+
+def _knock(ctx: RunContext):
+    p = ctx.preset
+    return generate_knock_removal(
+        ctx.logs.full, p.vars,
+        base_map=p.base_map("base_iga"), base_title=IGNITION_MAP,
+        axis_rpm=p.axis("rpm_iga"), axis_load=p.axis("maf_iga"),
+        min_samples=float(ctx.p("knock_min_samples", 1)),
+        step=float(ctx.p("knock_step", DEFAULT_STEP)),
+        messages=ctx.messages,
     )
 
 
@@ -79,7 +106,11 @@ SIEMENS_MS43 = Family(
     params=PARAMS,
     target_maps=TARGET_MAPS,
     log_sources=[LogSource("tunerpro", "TunerPro RT CSV", fuzzy_columns=True, required_channels=("rpm", "ve_table"))],
-    generators=[GeneratorSpec("ve", "VE Correction Tables", ("full",), ("rpm_ve", "map_ve"), _ve)],
+    generators=[
+        GeneratorSpec("ve", "VE Correction Tables", ("full",), ("rpm_ve", "map_ve"), _ve),
+        GeneratorSpec("knock", "Ignition Knock Removal", ("full",), ("rpm_iga", "maf_iga"), _knock,
+                      required_base_maps=("base_iga",)),
+    ],
     map_importer=XDF_IMPORTER,
     default_prep=DEFAULT_PREP,
     show_pressure_hack=False,

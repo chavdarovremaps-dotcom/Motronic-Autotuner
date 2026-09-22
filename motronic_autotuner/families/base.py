@@ -100,12 +100,16 @@ class GeneratorSpec:
     """Log subsets that must be non-empty: any of "full", "wot", "warmup", "hot"."""
     required_axes: tuple[str, ...]
     run: Callable[[RunContext], list[CalibrationMap]]
+    required_base_maps: tuple[str, ...] = ()
 
     def readiness(self, preset: Preset, logs: SplitLogs) -> str | None:
         """None when the generator can run, else the reason it is skipped."""
         missing = [a for a in self.required_axes if preset.axis(a) is None]
         if missing:
             return f"Missing axes in preset: {', '.join(missing)}"
+        missing = [m for m in self.required_base_maps if preset.base_map(m) is None]
+        if missing:
+            return f"Missing base maps in preset: {', '.join(missing)}"
         empty = [s for s in self.subsets if len(logs.subset(s)) == 0]
         if empty:
             return f"No {', '.join(s.upper() for s in empty)} log rows"
