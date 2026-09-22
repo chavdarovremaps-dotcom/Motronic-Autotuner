@@ -10,7 +10,7 @@ RON98 part/full load ignition map.
 from __future__ import annotations
 
 from ..core.winols import TargetMap
-from ..generators.ignition_knock import DEFAULT_STEP, generate_knock_removal
+from ..generators.ignition_knock import DEFAULT_MIN_PULL, DEFAULT_STEP, generate_knock_removal
 from ..generators.ve_3d import generate_ve_corrections
 from .base import XDF_IMPORTER, Family, GeneratorSpec, LogSource, ParamSpec, RunContext
 
@@ -64,6 +64,8 @@ PARAMS = [
     ParamSpec("knock_min_samples", "Min samples per cell", "int", 1, group="Ignition Knock Removal", minimum=0),
     ParamSpec("knock_step", "Timing step (deg)", "float", DEFAULT_STEP, group="Ignition Knock Removal",
               decimals=3, minimum=0.001),
+    ParamSpec("knock_min_pull", "Ignore average pull below (deg)", "float", DEFAULT_MIN_PULL,
+              group="Ignition Knock Removal", decimals=3, minimum=0),
 ]
 
 TARGET_MAPS = [
@@ -94,6 +96,7 @@ def _knock(ctx: RunContext):
         axis_rpm=p.axis("rpm_iga"), axis_load=p.axis("maf_iga"),
         min_samples=float(ctx.p("knock_min_samples", 1)),
         step=float(ctx.p("knock_step", DEFAULT_STEP)),
+        min_pull=float(ctx.p("knock_min_pull", DEFAULT_MIN_PULL)),
         messages=ctx.messages,
     )
 

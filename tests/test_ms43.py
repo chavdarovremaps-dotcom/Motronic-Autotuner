@@ -96,6 +96,8 @@ def test_timing_removal_steps():
     from motronic_autotuner.generators.ignition_knock import timing_removal
     pull = np.array([[np.nan, 0.0, 0.1, 0.375, 0.4, 0.75, 0.76, 1.5]])
     np.testing.assert_allclose(timing_removal(pull, 0.375), [[0, 0, 0.375, 0.375, 0.75, 0.75, 1.125, 1.5]])
+    # a floor leaves leaked slivers alone
+    np.testing.assert_allclose(timing_removal(np.array([0.001, 0.05, 0.2]), 0.375, min_pull=0.05), [0, 0.375, 0.375])
 
 
 def test_knock_removal_on_ignition_map(tmp_path):
@@ -109,6 +111,8 @@ def test_knock_removal_on_ignition_map(tmp_path):
     knock = np.zeros(n)
     knock[(rpm == 3000) & (load == 300)] = -0.4          # steady 0.4 pull in one cell
     knock[(rpm == 1000) & (load == 100)] = -1.0          # exactly on the grid
+    # one lone event just off a breakpoint leaks a sliver into (2000, 200): must not pull a step
+    rpm = np.append(rpm, 2050.0); load = np.append(load, 200.0); knock = np.append(knock, -1.5)
     data = pd.DataFrame({"Engine Speed": rpm, "Engine Load Ignition": load, "Knock Correction Average": knock})
     base = np.full((4, 3), 20.0)
     maps = generate_knock_removal(data, V, base_map=base, base_title="iga", axis_rpm=axis_rpm, axis_load=axis_load,
@@ -116,7 +120,7 @@ def test_knock_removal_on_ignition_map(tmp_path):
     by = {m.key: m for m in maps}
     removal = by["iga_removal"].values
     assert removal[2, 2] == pytest.approx(0.75) and removal[0, 0] == pytest.approx(1.125)
-    assert removal[1, 1] == 0.0
+    assert removal[1, 1] == 0.0 and 0 < by["knock_avg"].values[1, 1] < 0.05
     assert by["iga_corrected"].values[2, 2] == 19.25
     assert by["iga_corrected"].values[1, 1] == 20.0
     assert by["knock_avg"].values[2, 2] == pytest.approx(0.4)

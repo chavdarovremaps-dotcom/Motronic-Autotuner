@@ -17,14 +17,20 @@ from ..core.splatting import bilinear
 from . import column
 
 DEFAULT_STEP = 0.375
+DEFAULT_MIN_PULL = 0.05
 EPS = 1e-9
 
 
-def timing_removal(mean_pull: np.ndarray, step: float) -> np.ndarray:
-    """Round each non-zero average pull up to a whole number of steps; NaN and zero give 0."""
+def timing_removal(mean_pull: np.ndarray, step: float, min_pull: float = 0.0) -> np.ndarray:
+    """Round each average pull up to a whole number of steps.
+
+    NaN, zero and averages below ``min_pull`` give 0. The floor matters because
+    bilinear weighting leaks a sliver of a knock event into neighbouring cells,
+    and without it those cells would lose a full step for an average of 0.001.
+    """
     pull = np.nan_to_num(np.abs(mean_pull), nan=0.0)
     removal = np.ceil((pull - EPS) / step) * step
-    removal[pull <= EPS] = 0.0
+    removal[(pull <= EPS) | (pull < min_pull)] = 0.0
     return removal
 
 
@@ -38,6 +44,7 @@ def generate_knock_removal(
     axis_load: np.ndarray,
     min_samples: float,
     step: float = DEFAULT_STEP,
+    min_pull: float = DEFAULT_MIN_PULL,
     messages: list[str] | None = None,
 ) -> list[CalibrationMap]:
     """``base_map`` is ``[len(axis_rpm), len(axis_load)]``, RPM rows and load columns as in the XDF."""
@@ -50,11 +57,15 @@ def generate_knock_removal(
 
     knock = np.abs(column(data, v["knock"]))
     mean_pull, counts = bilinear(column(data, v["load_ign"]), column(data, v["rpm"]), knock, axis_load, axis_rpm, min_samples)
-    removal = timing_removal(mean_pull, step)
+    removal = timing_removal(mean_pull, step, min_pull)
     corrected = base - removal
 
     cells = int((removal > 0).sum())
-    messages.append(f"Knock removal: {cells} cells pulled, max {removal.max():.3f} deg, step {step:g} deg.")
+    ignored = int(((np.nan_to_num(mean_pull) > EPS) & (removal == 0)).sum())
+    messages.append(
+        f"Knock removal: {cells} cells pulled, max {removal.max():.3f} deg, step {step:g} deg; "
+        f"{ignored} cells with an average pull under {min_pull:g} deg left alone."
+    )
     corner = "RPM \\ Load"
     return [
         CalibrationMap("knock_avg", "Knock Correction Average (deg CRK)", mean_pull, axis_load, axis_rpm,
