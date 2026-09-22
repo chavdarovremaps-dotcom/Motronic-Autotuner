@@ -130,7 +130,7 @@ def test_wideband_ve_error(tmp_path):
     from motronic_autotuner.generators.ve_3d import generate_ve_corrections, wideband_afr
     rng = np.random.default_rng(4)
     n = 800
-    volts = np.full(n, (15.0 - 7.35) * 5 / 15.04)      # controller reads AFR 15.0
+    volts = np.full(n, (15.0 - 7.35) / 3.008)          # controller reads AFR 15.0
     volts[:20] = 0.0                                    # sensor not ready: at the rail
     data = pd.DataFrame({
         V["rpm"]: rng.uniform(1000, 6000, n), V["map"]: rng.uniform(20, 120, n), V["ve_table"]: 1.0,

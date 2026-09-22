@@ -71,7 +71,7 @@ PARAMS = [
     ParamSpec("min_samples", "Min samples per cell", "int", 2, group="VE Correction", minimum=0),
     ParamSpec("use_wideband", "VE error from wideband AFR on the analog input (instead of STFT + LTFT)", "bool",
               False, group="VE Correction"),
-    ParamSpec("wideband_gain", "Wideband AFR = V x gain / 5 + offset:  gain", "float", WIDEBAND_GAIN,
+    ParamSpec("wideband_gain", "Wideband AFR = V x gain + offset:  gain", "float", WIDEBAND_GAIN,
               group="VE Correction", decimals=3, minimum=0),
     ParamSpec("wideband_offset", "Wideband offset", "float", WIDEBAND_OFFSET, group="VE Correction", decimals=3),
     ParamSpec("knock_min_samples", "Min samples per cell", "int", 1, group="Ignition Knock Removal", minimum=0),

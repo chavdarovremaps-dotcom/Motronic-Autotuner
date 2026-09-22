@@ -7,7 +7,7 @@ second error source. Either:
 * ``"trims"``: rows in closed loop on every logged bank, error per bank is
   short term plus multiplicative long term trim in percent, banks averaged.
 * ``"wideband"``: every row with a valid analog wideband reading. The
-  controller's AFR is ``V * gain / 5 + offset`` and the error is
+  controller's AFR is ``V * gain + offset`` and the error is
   ``(measured / target - 1) * 100`` so that a lean reading is positive,
   the same sign convention as the trims: a positive error raises VE.
 
@@ -25,7 +25,7 @@ from . import column
 
 SOURCE_TRIMS = "trims"
 SOURCE_WIDEBAND = "wideband"
-WIDEBAND_GAIN = 15.04
+WIDEBAND_GAIN = 3.008
 WIDEBAND_OFFSET = 7.35
 RAIL_LOW_V = 0.02
 RAIL_HIGH_V = 4.98
@@ -56,7 +56,7 @@ def closed_loop_mask(data: pd.DataFrame, v: dict[str, str], messages: list[str])
 
 
 def wideband_afr(volts: np.ndarray, gain: float = WIDEBAND_GAIN, offset: float = WIDEBAND_OFFSET) -> np.ndarray:
-    return volts * gain / 5.0 + offset
+    return volts * gain + offset
 
 
 def trim_error(data: pd.DataFrame, v: dict[str, str], messages: list[str]) -> tuple[pd.DataFrame, np.ndarray]:
@@ -81,7 +81,7 @@ def wideband_error(data: pd.DataFrame, v: dict[str, str], gain: float, offset: f
     measured = wideband_afr(volts[valid], gain, offset)
     error = (measured / target[valid] - 1.0) * 100.0
     messages.append(
-        f"Wideband on {v['wideband_v']}: AFR = V * {gain:g} / 5 + {offset:g}. Using {len(d)} rows with a live signal "
+        f"Wideband on {v['wideband_v']}: AFR = V * {gain:g} + {offset:g}. Using {len(d)} rows with a live signal "
         f"(AFR {measured.min():.2f} to {measured.max():.2f}); {int((~valid).sum())} rows at the rails or without a target dropped."
     )
     if len(d) == 0:
