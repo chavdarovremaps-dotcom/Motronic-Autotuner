@@ -45,7 +45,7 @@ class IngestionTab(QWidget):
         row.addWidget(self.btn_browse)
         bv.addLayout(row)
         row2 = QHBoxLayout()
-        self.btn_import = QPushButton("Import & Auto-Split Raw Logs")
+        self.btn_import = QPushButton("Import && Auto-Split Raw Logs")
         self.lamp = Lamp()
         row2.addWidget(self.btn_import, 1)
         row2.addWidget(QLabel("Status"))

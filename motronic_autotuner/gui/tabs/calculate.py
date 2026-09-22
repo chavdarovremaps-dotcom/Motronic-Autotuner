@@ -31,7 +31,7 @@ class CalculateTab(QWidget):
     def _build(self) -> None:
         root = QVBoxLayout(self)
         top = QHBoxLayout()
-        self.btn_calc = QPushButton("Calculate Maps & Export to Excel")
+        self.btn_calc = QPushButton("Calculate Maps && Export to Excel")
         self.btn_export = QPushButton("Export Again...")
         self.btn_export.setEnabled(False)
         top.addWidget(self.btn_calc)
@@ -86,7 +86,7 @@ class CalculateTab(QWidget):
             result = self.family.run_all(self.state.preset, self.state.logs)
         finally:
             QApplication.restoreOverrideCursor()
-            self.btn_calc.setText("Calculate Maps & Export to Excel")
+            self.btn_calc.setText("Calculate Maps && Export to Excel")
             self.btn_calc.setEnabled(True)
         self.state.result = result
         self._fill_status_table()

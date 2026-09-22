@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
         self.calculate = CalculateTab(family, self.state, sync_params=self.ingestion.sync_to_preset)
 
         self.tabs.addTab(self.profile, "ECU Profile")
-        self.tabs.addTab(self.ingestion, "Data Ingestion & Filtering")
+        self.tabs.addTab(self.ingestion, "Data Ingestion && Filtering")
         self.tabs.addTab(self.calculate, "Calculate")
         for tab_cls in family.extra_tabs:
             tab = tab_cls(family, self.state)
