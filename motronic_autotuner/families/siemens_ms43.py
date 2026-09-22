@@ -10,6 +10,7 @@ RON98 part/full load ignition map.
 from __future__ import annotations
 
 from ..core.winols import TargetMap
+from ..generators import column
 from ..generators.ignition_knock import DEFAULT_MIN_PULL, DEFAULT_STEP, generate_knock_removal
 from ..generators.ve_3d import (
     SOURCE_TRIMS, SOURCE_WIDEBAND, WIDEBAND_GAIN, WIDEBAND_OFFSET, generate_ve_corrections,
@@ -106,10 +107,11 @@ def _ve(ctx: RunContext):
 
 def _knock(ctx: RunContext):
     p = ctx.preset
+    d = ctx.logs.full
     return generate_knock_removal(
-        ctx.logs.full, p.vars,
+        column(d, p.var("load_ign")), column(d, p.var("rpm")), column(d, p.var("knock")),
         base_map=p.base_map("base_iga"), base_title=IGNITION_MAP,
-        axis_rpm=p.axis("rpm_iga"), axis_load=p.axis("maf_iga"),
+        axis_x=p.axis("maf_iga"), axis_y=p.axis("rpm_iga"), x_label="Load", y_label="RPM",
         min_samples=float(ctx.p("knock_min_samples", 1)),
         step=float(ctx.p("knock_step", DEFAULT_STEP)),
         min_pull=float(ctx.p("knock_min_pull", DEFAULT_MIN_PULL)),

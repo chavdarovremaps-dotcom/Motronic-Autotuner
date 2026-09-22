@@ -113,17 +113,16 @@ def test_knock_removal_on_ignition_map(tmp_path):
     knock[(rpm == 1000) & (load == 100)] = -1.0          # exactly on the grid
     # one lone event just off a breakpoint leaks a sliver into (2000, 200): must not pull a step
     rpm = np.append(rpm, 2050.0); load = np.append(load, 200.0); knock = np.append(knock, -1.5)
-    data = pd.DataFrame({"Engine Speed": rpm, "Engine Load Ignition": load, "Knock Correction Average": knock})
     base = np.full((4, 3), 20.0)
-    maps = generate_knock_removal(data, V, base_map=base, base_title="iga", axis_rpm=axis_rpm, axis_load=axis_load,
-                                  min_samples=1)
+    maps = generate_knock_removal(load, rpm, knock, base_map=base, base_title="iga", axis_x=axis_load, axis_y=axis_rpm,
+                                  x_label="Load", y_label="RPM", min_samples=1)
     by = {m.key: m for m in maps}
     removal = by["iga_removal"].values
     assert removal[2, 2] == pytest.approx(0.75) and removal[0, 0] == pytest.approx(1.125)
-    assert removal[1, 1] == 0.0 and 0 < by["knock_avg"].values[1, 1] < 0.1
+    assert removal[1, 1] == 0.0 and 0 < by["iga_knock_avg"].values[1, 1] < 0.1
     assert by["iga_corrected"].values[2, 2] == 19.25
     assert by["iga_corrected"].values[1, 1] == 20.0
-    assert by["knock_avg"].values[2, 2] == pytest.approx(0.4)
+    assert by["iga_knock_avg"].values[2, 2] == pytest.approx(0.4)
 
 
 def test_wideband_ve_error(tmp_path):
