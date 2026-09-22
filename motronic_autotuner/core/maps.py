@@ -34,6 +34,9 @@ class CalibrationMap:
     skip_if_empty: bool = False
     """Leave the map out of the Excel file when every cell is NaN."""
 
+    sheet: str = ""
+    """Excel sheet the block goes on, e.g. ``"Boost"``; empty means the family's default sheet."""
+
     @property
     def all_nan(self) -> bool:
         return self.is_empty or bool(np.isnan(np.asarray(self.values, dtype=float)).all())

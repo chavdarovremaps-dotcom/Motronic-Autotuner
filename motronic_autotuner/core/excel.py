@@ -38,15 +38,31 @@ def _cell(v) -> float | None:
 
 
 def export_maps(path: str | Path, maps: list[CalibrationMap], sheet: str = "Tuning Maps") -> Path:
+    """Write every map as a block. Maps go on the sheet they name, in order of first
+    appearance; maps without one go on ``sheet``."""
     path = Path(path)
     wb = Workbook()
-    ws = wb.active
-    ws.title = sheet
-    row = 1
+    wb.remove(wb.active)
+    sheets: dict[str, tuple] = {}
 
     for m in maps:
         if m.is_empty or (m.skip_if_empty and m.all_nan):
             continue
+        name = (m.sheet or sheet)[:31]
+        if name not in sheets:
+            sheets[name] = (wb.create_sheet(name), 1)
+        ws, row = sheets[name]
+        row = _write_block(ws, row, m)
+        sheets[name] = (ws, row)
+
+    if not sheets:
+        wb.create_sheet(sheet[:31])
+    wb.save(path)
+    return path
+
+
+def _write_block(ws, row: int, m: CalibrationMap) -> int:
+    if True:
         x_axis = np.asarray(m.x_axis, dtype=float).ravel()
         y_labels = m.y_labels()
         nx, ny = x_axis.size, len(y_labels)
@@ -79,9 +95,7 @@ def export_maps(path: str | Path, maps: list[CalibrationMap], sheet: str = "Tuni
                 _write_row(ws, row, 1 + col_offset, [label, *[_cell(v) for v in counts[r]]])
             row += 1
         row += 1  # blank separator row
-
-    wb.save(path)
-    return path
+    return row
 
 
 def _write_row(ws, row: int, start_col: int, cells: list) -> None:

@@ -90,9 +90,15 @@ TARGET_MAPS = [
 # ---- generator wrappers: read the preset, call the pure math ------------------
 
 
+def _on_sheet(maps, sheet: str):
+    for m in maps:
+        m.sheet = sheet
+    return maps
+
+
 def _boost(ctx: RunContext):
     p = ctx.preset
-    return generate_boost_maps(
+    return _on_sheet(generate_boost_maps(
         ctx.logs.wot, p.vars,
         cwldimx=bool(ctx.p("cwldimx", False)),
         ambient_pressure=float(ctx.p("ambient_pressure", 1000)),
@@ -100,61 +106,61 @@ def _boost(ctx: RunContext):
         fill_missing=bool(ctx.p("fill_missing_data", False)),
         axis_rpm=p.axis("rpm_boost"), axis_boost=p.axis("boost"), axis_kfldrl_x=p.axis("kfldrl_x"),
         safety_margin=float(ctx.p("safety_margin", 0)),
-    )
+    ), "Boost")
 
 
 def _handover(ctx: RunContext):
     p = ctx.preset
-    return generate_handover_maps(
+    return _on_sheet(generate_handover_maps(
         ctx.logs.wot, p.vars,
         min_samples_base_wg=float(ctx.p("min_samples_base_wg", 1)),
         ambient_pressure=float(ctx.p("ambient_pressure", 1000)),
         axis_rpm=p.axis("rpm_kfvp"), axis_pratio=p.axis("pratio_kfvp"),
-    )
+    ), "Boost")
 
 
 def _warmup(ctx: RunContext):
     p = ctx.preset
-    return generate_warmup_maps(
+    return _on_sheet(generate_warmup_maps(
         ctx.logs.warmup, ctx.logs.full, p.vars,
         min_samples=float(ctx.p("min_samples", 1)),
         trim_format=str(ctx.p("trim_format", "lambda")),
         axis_tmot=p.axis("tmot"), axis_load=p.axis("load_kffwlw"), axis_rpm=p.axis("rpm_kffwlw"),
         hot_temp=float(ctx.p("temp_max", 80)),
         messages=ctx.messages,
-    )
+    ), "Fueling")
 
 
 def _fuel(ctx: RunContext):
     p = ctx.preset
-    return generate_fkkvs(
+    return _on_sheet(generate_fkkvs(
         ctx.logs.hot, p.vars,
         min_samples=float(ctx.p("min_samples", 1)),
         trim_format=str(ctx.p("trim_format", "lambda")),
         axis_rpm=p.axis("rpm_fuel"), axis_te=p.axis("te"),
-    )
+    ), "Fueling")
 
 
 def _ignition(ctx: RunContext):
     p = ctx.preset
-    return generate_kfzw(
+    return _on_sheet(generate_kfzw(
         ctx.logs.full, p.vars,
         min_samples=float(ctx.p("min_samples", 1)),
         axis_rpm=p.axis("rpm_ign"), axis_load=p.axis("load_ign"),
         vvt_split=float(ctx.p("vvt_threshold", 18)),
-    )
+    ), "Ignition")
 
 
 def _manifold(ctx: RunContext):
     p = ctx.preset
-    return generate_manifold_maps(
+    return _on_sheet(generate_manifold_maps(
         ctx.logs.full, p.vars,
         min_samples=float(ctx.p("min_samples", 1)),
         vvt_enabled=bool(ctx.p("vvt_enabled", False)),
         vvt_threshold=float(ctx.p("vvt_threshold", 18)),
         axis_rpm=p.axis("rpm_url"),
         messages=ctx.messages,
-    )
+    ), "Airflow")
 
 
 def _apply_5120_scaling(ctx: RunContext, result: RunResult) -> None:
@@ -192,4 +198,5 @@ BOSCH_ME7 = Family(
     generators=GENERATORS,
     post_process=[_apply_5120_scaling],
     default_prep=DEFAULT_PREP,
+    excel_sheet="Boost",
 )

@@ -1,0 +1,73 @@
+
+MG1CS201 compressor model and WGDC P factor.xlsx
+MG1CS201 compressor model and WGDC P
+factor
+.xlsx
+XLSX
+I have updated the export.
+
+Ran 2 commands
+Two things changed in this export: the compressor PR axis is now properly resolved (1.01 / 1.15 / 1.2 / 1.25 …, and the column I called 2.7 is actually 2.65 — values unchanged), and there's a new "WGDC P Correction" sheet. That sheet is the missing multiplier.
+
+The P-term chain is now fully explained
+
+P [kW] = P-factor(flow, PR) × P-Correction(deviation, flow) / 1000
+
+Running the log through both maps reproduces the logged P-factor with r = 0.98; the prediction sits ~10% low with some scatter, which looks like the deviation being filtered before it hits the map rather than a missing term. The "MAF REQ (P corr.)" channel in your log is the flow input to this correction map. So the P-factor map is kW per bar of shaped deviation, and the correction map is the shaping.
+
+What the correction map says about your car
+
+Flow axis ends at 277.8 g/s. You're at 300–470 g/s, so every WOT sample in the log is using the bottom row. The P-factor map already scales with flow (11–16 across 347–444 g/s), so this isn't fatal, but it means the shaping is identical everywhere you operate.
+Negative side has no breakpoints between −50 and −500 hPa. Your entire overshoot band (−60 to −260 hPa) is a straight line between −79 and −1045 — gain ~1.8–2.0×. At the −216 hPa peak in 5th it gives −436 → ×12.1 kW/bar = −5.3 kW predicted, −8.6 logged; either way only 10–17% of a 50 kW base.
+Positive side has a dip: +10 → 31.5, +30 → 45.4, +50 → 113. The slope collapses between 10 and 30 hPa then triples. Your 2nd/3rd gear "stuck 0.06–0.10 under" sits at +60–100 hPa (136–227), so it's above the dip, but anything settling around +20–35 hPa gets almost no P.
+Small-deviation zone is fine (±5–20 hPa → ~1.5–1.8×).
+Edits I'd make to the correction map (277.8 row, then copy upward with proportionally smaller values)
+
+Add breakpoints at −100, −200, −300 if the axis is editable. Suggested: −100 → −240, −200 → −500, −300 → −720, keep −500 → −1045. That's roughly +25% authority in the overshoot band without touching the small-deviation zone or the spool side.
+Fix the +30 cell: 45.4 → ~78, so 10 → 30 → 50 runs 31.5 / 78 / 113 instead of dipping.
+If you can add a flow row, add one at ~400 g/s that's ~15% larger than 277.8 on the negative side only.
+I'd still leave the P-factor map alone for now except un-drooping the 277.8 and 347.2 rows (they fall 25–30% from PR 1.0 to 2.2+) — with the correction map shaped, you don't need a blanket 20–30% increase there.
+
+Compressor table, corrected for the real axis
+
+The 2.65 column of the reshape I gave you should be 30.6 / 36.8 / 46.6 / 52.3 for the 305.6 / 347.2 / 388.9 / 444.4 rows (−8% / −4% / +1% / −6% vs current 33.2 / 38.2 / 46.1 / 55.5). Everything else in that table stands.
+
+Order of operations hasn't changed: compressor table first, then re-log, then this correction map, then P-factor if anything's left. Neither map touches the shift spike — that's still the gearshift wastegate handling, and it's still the knock source.
+
+can you recalculate the maps I need to change and export them in some excel file so I can flash and relog with them. Adjust the axis also, interpolate from current values if we dont have data for these cells.
+
+Ran 3 commands, read a file, shared files
+The three maps are in the file above, laid out the same way as your export (axis in row 1 / column A, values only so they paste straight in), each with a _pct sheet showing the change per cell versus the current table re-interpolated onto the new axis, plus a README with every assumption.
+
+What's in it
+
+Breakpoint counts are unchanged on all three maps — only breakpoint values moved:
+
+Compressor: flow axis now 27.8 … 277.8 / 320 / 360 / 400 / 450 / 500 (dropped 44.4 and 305.6). PR axis untouched. Rows ≥277.8 rebuilt as constant-efficiency curves anchored at PR 2.5 (23.5 / 30.5 / 37.0 / 44.0 / 48.2 / 53.0 kW); below PR 2.0 on those rows the shape is blended back to current values since those cells are unreachable. Rows ≤250 are pure re-interpolation.
+P factor: flow axis extended to 500 the same way; PR axis drops 1.7/1.9, moves 2.65 → 2.6, adds 2.4 and 3.0. Values re-interpolated; rows ≥250 have the high-PR droop removed (floored at 92% of the row's PR≈1 value, ramped in from PR 1.5). Rows above 444.4 are linearly extrapolated.
+P correction: deviation axis now −500 / −250 / −150 / −80 / −30 / −5 / 0 / 5 / 20 / 50 / 100 / 500; flow axis 20.8 / 100 / 180.6 / 277.8 / 360 / 450. The 277.8 row has ~2.5× gain across the overshoot band and the +20 hPa dip fixed; 180.6 scaled proportionally; 20.8 and 100 rows untouched (re-interpolated only); 360 and 450 rows add 8% / 15% on the negative side.
+Expected effect on the feed-forward at your logged operating points
+
+Point	Old base	New base
+2nd gear, req 370 g/s / PR 2.22	28.7 kW	33.1 kW
+3rd early, 380 / 2.42	37.0	38.9
+3rd–4th top, 460 / 2.58	53.0 (clamped)	51.1
+5th steady, 450 / 2.60	53.7 (clamped)	50.5
+Before flashing
+
+Check that your tool accepts axis edits on all three maps and that the axis values are stored with the resolution you need (some definitions store flow as integer g/s or PR × 1000 — round accordingly).
+Spot-check three cells against the _pct sheets so you're happy with the direction of change before committing.
+These maps don't touch the shift spike; that's still the gearshift wastegate handling, and I'd expect the 4th/5th overshoot to be shorter but still there until that's addressed.
+For the relog: 20+ Hz, same road and gears, WOT from ~2000 rpm in 1st, with boost target, boost, EWG position, WGDC, P/I/D factors, Compressor base, throttle, gear and cyl-1 timing correction. The I-factor at steady state in each gear is the score — within ±1% means the feed-forward is right.
+
+
+Mg1cs201 boost maps rev1
+Spreadsheet·XLSX 
+
+Write a message…
+
+
+Claude is AI and can make mistakes. Please double-check responses.
+
+
+

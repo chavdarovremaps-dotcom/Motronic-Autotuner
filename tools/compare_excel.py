@@ -17,8 +17,13 @@ GAP_COLS = 2
 
 
 def read_blocks(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray | None]]:
-    ws = load_workbook(path, data_only=True).worksheets[0]
-    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    blocks = {}
+    for ws in load_workbook(path, data_only=True).worksheets:
+        blocks.update(_read_sheet([list(r) for r in ws.iter_rows(values_only=True)]))
+    return blocks
+
+
+def _read_sheet(rows):
     blocks = {}
     r = 0
     while r < len(rows):

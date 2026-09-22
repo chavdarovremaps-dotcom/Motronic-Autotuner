@@ -90,10 +90,16 @@ TARGET_MAPS = [
 ]
 
 
+def _on_sheet(maps, sheet: str):
+    for m in maps:
+        m.sheet = sheet
+    return maps
+
+
 def _ve(ctx: RunContext):
     p = ctx.preset
     bases = {i: p.base_map(f"base_ve_{i}") for i in range(1, VE_TABLES + 1)}
-    return generate_ve_corrections(
+    return _on_sheet(generate_ve_corrections(
         ctx.logs.full, p.vars,
         min_samples=float(ctx.p("min_samples", 2)),
         axis_rpm=p.axis("rpm_ve"), axis_map=p.axis("map_ve"),
@@ -102,13 +108,13 @@ def _ve(ctx: RunContext):
         wideband_gain=float(ctx.p("wideband_gain", WIDEBAND_GAIN)),
         wideband_offset=float(ctx.p("wideband_offset", WIDEBAND_OFFSET)),
         messages=ctx.messages,
-    )
+    ), "Fueling")
 
 
 def _knock(ctx: RunContext):
     p = ctx.preset
     d = ctx.logs.full
-    return generate_knock_removal(
+    return _on_sheet(generate_knock_removal(
         column(d, p.var("load_ign")), column(d, p.var("rpm")), column(d, p.var("knock")),
         base_map=p.base_map("base_iga"), base_title=IGNITION_MAP,
         axis_x=p.axis("maf_iga"), axis_y=p.axis("rpm_iga"), x_label="Load", y_label="RPM",
@@ -116,7 +122,7 @@ def _knock(ctx: RunContext):
         step=float(ctx.p("knock_step", DEFAULT_STEP)),
         min_pull=float(ctx.p("knock_min_pull", DEFAULT_MIN_PULL)),
         messages=ctx.messages,
-    )
+    ), "Ignition")
 
 
 SIEMENS_MS43 = Family(
@@ -136,6 +142,6 @@ SIEMENS_MS43 = Family(
     ingest_checks=[flag_was_on("vanos_limp", "VANOS Limp Home")],
     default_prep=DEFAULT_PREP,
     show_pressure_hack=False,
-    excel_sheet="MS43 VE Maps",
+    excel_sheet="Fueling",
     excel_default_name="MS43_Tuning_Maps.xlsx",
 )

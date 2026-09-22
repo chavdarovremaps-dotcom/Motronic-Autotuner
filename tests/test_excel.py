@@ -34,3 +34,12 @@ def test_transposed_values_are_healed(tmp_path):
     path = export_maps(tmp_path / "t.xlsx", [m])
     ws = load_workbook(path)["Tuning Maps"]
     assert ws["D3"].value == 1.0 and ws["A4"].value == 20 and ws["A5"].value is None
+
+
+def test_maps_go_on_their_own_sheets(tmp_path):
+    a = CalibrationMap("a", "A", np.ones((1, 1)), np.array([1]), np.array([1]), sheet="Boost")
+    b = CalibrationMap("b", "B", np.ones((1, 1)), np.array([1]), np.array([1]), sheet="Ignition")
+    c = CalibrationMap("c", "C", np.ones((1, 1)), np.array([1]), np.array([1]))
+    wb = load_workbook(export_maps(tmp_path / "s.xlsx", [a, b, c], sheet="Fueling"))
+    assert wb.sheetnames == ["Boost", "Ignition", "Fueling"]
+    assert wb["Ignition"]["A1"].value == "B"

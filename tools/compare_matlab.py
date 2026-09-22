@@ -24,8 +24,13 @@ from motronic_autotuner.families.bosch_me7 import BOSCH_ME7  # noqa: E402
 
 
 def read_blocks(path: Path) -> dict[str, np.ndarray]:
-    ws = load_workbook(path, data_only=True).worksheets[0]
-    rows = list(ws.iter_rows(values_only=True))
+    blocks: dict[str, np.ndarray] = {}
+    for ws in load_workbook(path, data_only=True).worksheets:
+        blocks.update(_read_sheet(list(ws.iter_rows(values_only=True))))
+    return blocks
+
+
+def _read_sheet(rows):
     blocks: dict[str, np.ndarray] = {}
     r = 0
     while r < len(rows):
