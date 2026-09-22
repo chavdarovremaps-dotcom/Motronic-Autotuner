@@ -10,3 +10,6 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+Scripts/Comparison/
+Scripts/PreparedLogs/
+Used_ECU_Profile.json
