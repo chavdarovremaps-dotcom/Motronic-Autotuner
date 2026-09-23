@@ -30,3 +30,19 @@ def trim_percent(stft: np.ndarray, ltft: np.ndarray, trim_format: str) -> np.nda
     if trim_format == "percent":
         return stft + ltft
     return (stft * ltft - 1.0) * 100.0
+
+
+def near_gear_change(gear, time, blank_s: float) -> np.ndarray:
+    """True for rows within ``blank_s`` seconds of a gear change.
+
+    Automatic shifts close the throttle and cut fuel for a few hundred
+    milliseconds; the trims, boost and knock channels are meaningless there.
+    """
+    gear = np.asarray(gear, dtype=float)
+    time = np.asarray(time, dtype=float)
+    out = np.zeros(gear.size, dtype=bool)
+    if gear.size < 2 or blank_s <= 0:
+        return out
+    for i in np.flatnonzero(np.diff(gear) != 0) + 1:
+        out |= np.abs(time - time[i]) <= blank_s
+    return out

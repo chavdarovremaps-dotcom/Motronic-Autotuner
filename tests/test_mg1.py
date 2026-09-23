@@ -20,9 +20,13 @@ def write_mhd_log(path, n=1500, seed=0):
     knock[hot, 0] = -3.0                                                # cylinder 1 pulls 3 deg
     knock[hot, 3] = -1.5                                                # cylinder 4 pulls 1.5 deg
     stft = np.where(load > 100, 4.0, -2.0)                              # lean up top, rich below
+    gear = np.full(n, 4.0); gear[700:] = 5.0                             # one shift at row 700 (t = 56.0 s)
+    afr = np.full(n, 12.0); afr[900:911] = 22.0                          # a fuel cut at rows 900..910
+    stft[694:707] = 50.0; stft[900:911] = 50.0                           # garbage in the shift and cut rows
     cols = {"Time": np.arange(n) * 0.08, "RPM (rpm)": rpm, "Load actual RAM": load, "STFT 1 (-)": stft,
+            "LTFT 1 (-)": 2.0, "Lambda 1 (AFR)": afr,
             "Boost (PSI)": rng.uniform(0, 25, n), "Accel Ped. Pos. (%)": np.where(load > 150, 100.0, 30.0),
-            "Coolant (*F)": 194.0, "Gear (-)": 4}
+            "Coolant (*F)": 194.0, "Gear (-)": gear}
     for i in range(6):
         cols[f"Cyl{i + 1} Timing Cor (*)"] = knock[:, i]
     df = pd.DataFrame(cols)
@@ -76,8 +80,11 @@ def test_pipeline_on_imperial_mhd_log(tmp_path):
     err = res.map("fuel_error").values
     has = ~np.isnan(err)
     assert has.any()
-    np.testing.assert_allclose(fuel[has & (np.asarray(LOAD)[:, None] > 110)], 1.04)
-    np.testing.assert_allclose(fuel[has & (np.asarray(LOAD)[:, None] < 90)], 0.98)
+    # STFT + LTFT: +4 + 2 up top, -2 + 2 below; the shift and fuel-cut rows (STFT 50) never reach the cells
+    np.testing.assert_allclose(fuel[has & (np.asarray(LOAD)[:, None] > 110)], 1.06)
+    np.testing.assert_allclose(fuel[has & (np.asarray(LOAD)[:, None] < 90)], 1.00)
+    assert any("13 of 1499 rows within 0.5 s of a shift" in m for m in res.messages)
+    assert any("11 fuel-cut rows" in m for m in res.messages)
 
 
 def test_worst_cylinder_pulls_more(tmp_path):

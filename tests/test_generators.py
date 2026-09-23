@@ -148,3 +148,12 @@ def test_5120_post_process_scales_manifold_maps():
     assert result.map("kfurl") is not None
     np.testing.assert_allclose(np.nanmean(result.map("kfurl").values), 0.16, rtol=0.05)
     assert any(r.name == "5120 Patch" for r in result.rows)
+
+
+def test_near_gear_change_blanks_both_sides():
+    from motronic_autotuner.generators import near_gear_change
+    t = np.arange(20) * 0.1
+    gear = np.r_[np.full(10, 3.0), np.full(10, 4.0)]      # change at row 10, t = 1.0
+    near = near_gear_change(gear, t, 0.25)
+    assert near.tolist() == [i in (8, 9, 10, 11, 12) for i in range(20)]
+    assert not near_gear_change(gear, t, 0.0).any()

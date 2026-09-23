@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..core.winols import TargetMap
-from ..generators import column
+from ..generators import column, near_gear_change
 from ..generators.boost_feedforward import generate_compressor_feedforward, p_chain_check
 from ..generators.ignition_knock import DEFAULT_MIN_PULL, generate_knock_removal
 from ..generators.scalar_correction import generate_scalar_correction
@@ -34,6 +34,8 @@ DEFAULT_VARS = {
     "rpm": "RPM",
     "load": "Load actual RAM",
     "stft": "STFT 1",
+    "ltft": "LTFT 1",
+    "lambda": "Lambda 1",
     **{f"knock_cyl{i}": f"Cyl{i} Timing Cor" for i in range(1, CYLINDERS + 1)},
     "boost": "Boost",
     "boost_target": "Boost target",
@@ -49,6 +51,7 @@ DEFAULT_VARS = {
     "d_term": "WGDC D-factor",
     "i_term": "WGDC I-factor",
     "pedal": "Accel Ped. Pos.",
+    "throttle": "Throttle Position",
     "gear": "Gear",
     "tmot": "Coolant",
     "time": "Time",
@@ -58,6 +61,8 @@ VAR_LABELS = {
     "rpm": "Engine speed",
     "load": "Engine load (%)",
     "stft": "Short term trim (%)",
+    "ltft": "Long term trim (%), optional",
+    "lambda": "Lambda / AFR, optional (fuel-cut rows)",
     **{f"knock_cyl{i}": f"Knock correction cyl {i}" for i in range(1, CYLINDERS + 1)},
     "boost": "Boost (bar)",
     "boost_target": "Boost target (bar)",
@@ -73,6 +78,7 @@ VAR_LABELS = {
     "d_term": "Logged D term (kW)",
     "i_term": "Logged I term (%)",
     "pedal": "Pedal position (%)",
+    "throttle": "Throttle position (%), optional",
     "gear": "Gear",
     "tmot": "Coolant temp",
     "time": "Time",
@@ -82,6 +88,7 @@ DEFAULT_PREP = {"align_timestamps": True, "hack_5120": False, "pressure_columns"
 
 PARAMS = [
     ParamSpec("wot_min", "WOT minimum pedal (%)", "float", 80.0, group="Log Split", minimum=0, maximum=100),
+    ParamSpec("shift_blank", "Ignore rows within (s) of a gear change", "float", 0.5, group="Log Split", decimals=2, minimum=0),
     ParamSpec("boost_min_samples", "Min samples per cell", "int", 2, group="Boost Feed-Forward", minimum=0),
     ParamSpec("boost_max_dev", "Steady state: |deviation| below (bar)", "float", 0.05, group="Boost Feed-Forward",
               decimals=3, minimum=0),
@@ -93,6 +100,7 @@ PARAMS = [
     ParamSpec("knock_min_pull", "Ignore average pull below (deg)", "float", DEFAULT_MIN_PULL,
               group="Timing Knock Removal", decimals=3, minimum=0),
     ParamSpec("fuel_min_samples", "Min samples per cell", "int", 2, group="Fuel Scalar Correction", minimum=0),
+    ParamSpec("fuel_max_afr", "Ignore rows with AFR above (fuel cut)", "float", 16.0, group="Fuel Scalar Correction", minimum=0),
 ]
 
 TARGET_MAPS = [
@@ -123,9 +131,21 @@ def knock_signal(data, v: dict[str, str], source: str) -> np.ndarray:
     return stack.max(axis=1) if source == "worst" else stack.mean(axis=1)
 
 
+def _shift_rows(ctx: RunContext, d) -> np.ndarray | None:
+    """Rows around a gear change, when gear and time are logged."""
+    v = ctx.preset.vars
+    blank = float(ctx.p("shift_blank", 0.5))
+    if blank <= 0 or v.get("gear") not in d.columns or v.get("time") not in d.columns:
+        return None
+    near = near_gear_change(column(d, v["gear"]), column(d, v["time"]), blank)
+    ctx.messages.append(f"Gear changes: {int(near.sum())} of {len(d)} rows within {blank:g} s of a shift are ignored.")
+    return near
+
+
 def _boost(ctx: RunContext):
     p = ctx.preset
     d = ctx.logs.full
+    near_shift = _shift_rows(ctx, d)
     if p.base_map("base_pfac") is not None and p.base_map("base_pcorr") is not None:
         p_chain_check(
             d, p.vars,
@@ -138,7 +158,7 @@ def _boost(ctx: RunContext):
         axis_ratio=p.axis("ratio_comp"), axis_flow=p.axis("maf_comp"),
         min_samples=float(ctx.p("boost_min_samples", 2)), min_pedal=float(ctx.p("wot_min", 80)),
         max_dev_bar=float(ctx.p("boost_max_dev", 0.05)), min_rpm=float(ctx.p("boost_min_rpm", 3000)),
-        messages=ctx.messages,
+        exclude=near_shift, messages=ctx.messages,
     ), "Boost")
 
 
@@ -165,13 +185,33 @@ def _timing(ctx: RunContext):
 
 
 def _fuel(ctx: RunContext):
+    """Fuel scalar error from the trims: STFT plus LTFT when the long term
+    trim is logged, without fuel-cut rows and rows around gear changes."""
     p = ctx.preset
     d = ctx.logs.full
+    error = column(d, p.var("stft"))
+    title = "STFT Average (%)"
+    if p.var("ltft") in d.columns:
+        error = error + column(d, p.var("ltft"))
+        title = "STFT + LTFT Average (%)"
+    else:
+        ctx.messages.append("Fuel scalar: LTFT not logged, the error is STFT alone.")
+    keep = np.ones(len(d), dtype=bool)
+    near_shift = _shift_rows(ctx, d)
+    if near_shift is not None:
+        keep &= ~near_shift
+    max_afr = float(ctx.p("fuel_max_afr", 16))
+    if p.var("lambda") in d.columns and max_afr > 0:
+        cut = column(d, p.var("lambda")) > max_afr
+        ctx.messages.append(f"Fuel scalar: {int(cut.sum())} fuel-cut rows (AFR above {max_afr:g}) ignored.")
+        keep &= ~cut
+    ctx.messages.append(f"Fuel scalar: {int(keep.sum())} of {len(d)} rows used.")
+    rpm, load = column(d, p.var("rpm")), column(d, p.var("load"))
     return _on_sheet(generate_scalar_correction(
-        column(d, p.var("rpm")), column(d, p.var("load")), column(d, p.var("stft")),
+        rpm[keep], load[keep], error[keep],
         base_map=p.base_map("base_fuel"), base_title=FUEL_SCALAR,
         axis_x=p.axis("rpm_fuel"), axis_y=p.axis("load_fuel"), x_label="RPM", y_label="Load %",
-        min_samples=float(ctx.p("fuel_min_samples", 2)), key="fuel", error_title="STFT Average (%)",
+        min_samples=float(ctx.p("fuel_min_samples", 2)), key="fuel", error_title=title,
         messages=ctx.messages,
     ), "Fueling")
 

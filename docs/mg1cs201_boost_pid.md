@@ -119,12 +119,54 @@ Expected feed-forward at the logged points after rev 1:
 | 3rd to 4th top, 460 g/s, ratio 2.58 | 53.0 clamped | 51.1 |
 | 5th steady, 450 g/s, ratio 2.60 | 53.7 clamped | 50.5 |
 
+## What the 2026-09-23 stage 3 logs showed
+
+Three logs from the G05 40i with the Turbosystems stage 3 turbo, 95 RON on
+map 1, PRGID 00005D55465A09, 9.5 Hz, about 400 s in total with five wide-open
+pulls in gears 2 to 6. The boost tables in the car's bin are unchanged from
+the reference bin; only the timing maps were edited. Rev 1 above was not
+flashed and, on this evidence, is not needed.
+
+| Observation | Value |
+| --- | --- |
+| Boost against target in single-gear pulls (gears 3 to 5, 4500 to 6500 rpm) | within 0.05 bar |
+| Spool in gear 4 from 3000 rpm, gate shut at 100 % duty | target reached 0.65 s after full pedal, overshoot 0.03 bar |
+| Steady duty at 1.45 to 1.55 bar | 76 to 83 %, EWG 19 to 21 mm |
+| Steady I term per gear | -0.6 to +0.5 % |
+| Steady P term per gear | 0.0 to +0.5 kW |
+| Feed-forward error, 17 cells, 250 to 444 g/s | -0.3 to +0.8 kW |
+| P chain check on the RAM deviation channel | correlation 0.97, ratio 0.97 |
+| Largest logged boost | 1.87 bar, charge pipe, during the 3rd to 6th gear shift |
+
+The only large deviations sit inside gear changes: the transmission closes
+the throttle to about 50 % for 0.3 s, charge-pipe pressure spikes 0.2 to 0.4
+bar above target while manifold pressure stays on target, P goes to about
+-5 kW and the gate opens. The controller is back within 0.05 bar about a
+second after the shift. That is torque intervention, not a PID problem, so
+the tool now ignores rows within 0.5 s of a gear change and requires the
+throttle, not only the pedal, to be open.
+
+Conclusion: with the OEM tables the stage 3 turbo is controlled well at
+these targets. The compressor table corrections are within noise and can be
+skipped. The targets themselves are the user's choice. Revisit the P tables
+only if targets rise to where duty runs above 90 % steady.
+
+Also seen: the logged P term follows "Boost deviation RAM" better than the
+filtered "Boost deviation" (0.97 against 0.92 on the reference log), so log
+the RAM variant.
+
 ## Relog protocol
 
 20 Hz or faster. Same road and gears. Wide open from about 2000 rpm in each
-gear. Channels: boost target, boost, EWG position, WGDC, P, I and D factors,
-compressor base and after P-D, MAF req. WGDC, MAF REQ (P corr.), boost
-setpoint factor, throttle, gear, cylinder 1 timing correction.
+gear. Channels: boost target RAM, boost, boost (mani), boost deviation RAM,
+EWG position, WGDC, P, I and D factors, compressor base and after P-D,
+MAF, MAF req. WGDC, MAF REQ (P corr.), boost setpoint factor, throttle,
+pedal, gear, RPM, Load actual RAM, STFT 1, LTFT 1, Lambda 1, the six
+cylinder timing corrections, Timing Cyl. 1 to 6, coolant, IAT, ambient
+pressure, Status Torque limiter, Torque lim. 1, RF Max Index, TQ Max Index.
+Boost target RAM and Boost target duplicate each other; Load act. is a
+coarser twin of Load actual RAM. MHD lowers the rate as channels are added:
+51 channels gave 9.5 to 12 Hz, so keep a shorter boost profile for pulls.
 
 Before flashing an axis edit, check that TunerPro accepts axis changes on the
 table and that the axis is stored with the resolution needed: some
@@ -141,6 +183,10 @@ definitions hold flow as integer g/s or ratio times 1000.
 - *P chain check*: reproduces the logged P term from the P factor and P
   correction tables and reports the correlation and the median ratio, so a
   wrong axis or channel is caught before any edit.
+- Rows within 0.5 s of a gear change (parameter) are ignored by the
+  feed-forward and by the fuel scalar correction; the steady mask also needs
+  the throttle open when it is logged. The fuel scalar error is STFT plus
+  LTFT when LTFT is logged, without fuel-cut rows (AFR above 16, parameter).
 
 Planned: a boost response report per pull, with rise time, overshoot,
 settling and oscillation, and guided scaling of the P correction and P

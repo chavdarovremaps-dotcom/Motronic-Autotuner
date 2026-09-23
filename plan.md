@@ -1,6 +1,6 @@
 # Motronic Autotuner: working plan and handoff
 
-State of the Python port as of 2026-09-23, kept so work can resume without
+State of the Python port as of 2026-09-23 (evening), kept so work can resume without
 re-reading the history. Update this file when a stage lands or a decision
 changes. The tuning theory for MG1CS201 lives in `docs/mg1cs201_boost_pid.md`;
 the design overview is the Claude doc "Motronic Autotuner Overview".
@@ -58,7 +58,7 @@ family means one `TargetMap` line and one generator wrapper.
 | --- | --- | --- | --- | --- |
 | Bosch ME7 | WinOLS CSV export | ME7-Logger, TunerPro | boost, handover, warmup, fuel, ignition, manifold model | identical to MATLAB on real logs |
 | Siemens MS43 (MS4X) | XDF + bin | TunerPro RT (ON/OFF flags) | closed-loop VE (trims or wideband, paste-ready corrected tables), knock removal on ip_iga_ron98_pl__n__maf | unit tests; VANOS limp-home warning on import |
-| Bosch MG1CS201 (MHD) | XDF + bin | MHD | timing knock removal on main 1/2 and cold 1/2 (average or worst cylinder), Fuel scalar 1 from STFT, compressor feed-forward + P chain check | unit tests; run on one reference log |
+| Bosch MG1CS201 (MHD) | XDF + bin | MHD | timing knock removal on main 1/2 and cold 1/2 (average or worst cylinder), Fuel scalar 1 from STFT + LTFT without fuel-cut and shift rows, compressor feed-forward + P chain check; rows near gear changes ignored | unit tests; run on the reference log and on the 2026-09-23 stage 3 logs |
 
 Not started: MED9 (ME7 set plus KFLDHBN, KFVPDKSE with an extra tab), ME7.6
 and ME1.5 Opel (two log sources each: OP-COM or vehicle logger), ME3.8,
@@ -68,9 +68,20 @@ MED17.
 
 Stage 1 done: compressor characteristic corrected by the steady after-P-D
 minus base effort on setpoint ratio by MAF req. WGDC; steady P and I per
-gear reported; P chain check reproduces the logged P term (0.92
-correlation, 0.79 of logged on the reference log, likely a filtered
-deviation).
+gear reported; P chain check reproduces the logged P term (0.97
+correlation and 0.97 ratio with "Boost deviation RAM"; the filtered "Boost
+deviation" gave 0.92 and 0.79 on the reference log).
+
+2026-09-23 stage 3 logs (`...\bmw g05 40i turbosystems\Tune for 95 on Map 1\`,
+three MHD logs plus the running bin, PRGID 00005D55465A09, same boost tables
+as the reference bin): boost within 0.05 bar of target in single-gear
+pulls, spool overshoot 0.03 bar, steady duty 76 to 83 %, I within 0.6 %,
+feed-forward error under 0.8 kW. The only big deviations are the shift
+spikes in the charge pipe. Verdict: OEM tables control the stage 3 turbo
+fine at 1.45 to 1.55 bar; no P edits, rev 1 from the reference log not
+needed. Results Excel: `MG1CS201_Tuning_Maps_2026-09-23.xlsx` in that
+folder (fuel scalar +5 to +10 % over loads 60 to 200; 29 timing cells pulled
+0.5 to 2 deg, the worst at load 90 to 100 around 2000 to 2250 rpm).
 
 Stage 2 next: per-pull boost response report. For each wide-open pull find
 the target step, then rise time to 90 percent, overshoot, settling time,
@@ -88,7 +99,14 @@ reference bin those tables are unprogrammed filler.
 
 ## Open items
 
-- [ ] Boost stage 2 and 3 as above.
+- [ ] Boost stage 2 and 3 as above (stage 3 only if targets rise).
+- [ ] Which timing map is active: the logged "Timing Cyl. 1" minus its
+      correction does not line up with any of the four maps within a degree
+      (residual scatter 16 deg), so the final timing carries corrections the
+      maps alone do not explain. Keep pulling all four until a better
+      channel (base timing before corrections) is found in MHD.
+- [ ] MHD channel checklist lives in docs/mg1cs201_boost_pid.md, relog
+      protocol section.
 - [ ] MS43: compare against the MATLAB helper on a clean log (the 2026-09-22
       log had VANOS limp home ON throughout). Axes to paste into the helper:
       rpm 192 448 704 992 1504 2016 2496 3008 3488 4000 4512 4992 5500 6016 6200 6496;

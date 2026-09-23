@@ -25,9 +25,18 @@ def map_lookup(values: np.ndarray, axis_x: np.ndarray, axis_y: np.ndarray, x: np
     return f(np.column_stack([yc, xc]))
 
 
-def steady_mask(data: pd.DataFrame, v: dict[str, str], *, min_pedal: float, max_dev_bar: float, min_rpm: float) -> np.ndarray:
+def steady_mask(data: pd.DataFrame, v: dict[str, str], *, min_pedal: float, max_dev_bar: float, min_rpm: float,
+                exclude: np.ndarray | None = None) -> np.ndarray:
+    """Wide-open, on-target rows. The throttle must be open too when it is
+    logged (a shift closes it while the pedal stays floored); ``exclude``
+    drops extra rows such as those around a gear change."""
     pedal = column(data, v["pedal"]) if v.get("pedal") in data.columns else np.full(len(data), 100.0)
-    return (pedal >= min_pedal) & (np.abs(column(data, v["boost_dev"])) <= max_dev_bar) & (column(data, v["rpm"]) >= min_rpm)
+    keep = (pedal >= min_pedal) & (np.abs(column(data, v["boost_dev"])) <= max_dev_bar) & (column(data, v["rpm"]) >= min_rpm)
+    if v.get("throttle") in data.columns:
+        keep &= column(data, v["throttle"]) >= min_pedal
+    if exclude is not None:
+        keep &= ~np.asarray(exclude, dtype=bool)
+    return keep
 
 
 def generate_compressor_feedforward(
@@ -42,6 +51,7 @@ def generate_compressor_feedforward(
     min_pedal: float,
     max_dev_bar: float,
     min_rpm: float,
+    exclude: np.ndarray | None = None,
     messages: list[str] | None = None,
 ) -> list[CalibrationMap]:
     """Average (after P-D minus base) in steady wide-open rows per cell of the
@@ -53,7 +63,7 @@ def generate_compressor_feedforward(
     if base.shape != (axis_flow.size, axis_ratio.size):
         raise ValueError(f"{base_title}: base map is {base.shape}, axes give {(axis_flow.size, axis_ratio.size)}")
 
-    keep = steady_mask(data, v, min_pedal=min_pedal, max_dev_bar=max_dev_bar, min_rpm=min_rpm)
+    keep = steady_mask(data, v, min_pedal=min_pedal, max_dev_bar=max_dev_bar, min_rpm=min_rpm, exclude=exclude)
     d = data[keep]
     messages.append(
         f"Feed-forward: {len(d)} steady rows of {len(data)} (pedal >= {min_pedal:g} %, |deviation| <= {max_dev_bar:g} bar, "
