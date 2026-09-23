@@ -26,17 +26,20 @@ def map_lookup(values: np.ndarray, axis_x: np.ndarray, axis_y: np.ndarray, x: np
 
 
 def steady_mask(data: pd.DataFrame, v: dict[str, str], *, min_target: float, max_dev_bar: float,
-                min_rpm: float = 0.0, exclude: np.ndarray | None = None) -> np.ndarray:
+                min_throttle: float = 0.0, min_rpm: float = 0.0, exclude: np.ndarray | None = None) -> np.ndarray:
     """Rows where the boost controller is active and settled.
 
     Active: the boost target is at least ``min_target`` bar (below that the
     DME requests nothing and the P, I and D terms carry no information about
-    the table). Settled: |deviation| within ``max_dev_bar``. Pedal and
-    throttle are not conditions, so part-throttle boost requests count too;
-    that is how the low-ratio, low-flow cells of the table get data.
-    ``exclude`` drops extra rows such as those around a gear change.
+    the table) and, when the throttle is logged, the throttle is at least
+    ``min_throttle`` percent. The accelerator pedal is not a condition: at
+    half pedal the DME still requests boost. Settled: |deviation| within
+    ``max_dev_bar``. ``exclude`` drops extra rows such as those around a
+    gear change.
     """
     keep = (column(data, v["boost_target"]) >= min_target) & (np.abs(column(data, v["boost_dev"])) <= max_dev_bar)
+    if min_throttle > 0 and v.get("throttle") in data.columns:
+        keep &= column(data, v["throttle"]) >= min_throttle
     if min_rpm > 0:
         keep &= column(data, v["rpm"]) >= min_rpm
     if exclude is not None:
@@ -55,6 +58,7 @@ def generate_compressor_feedforward(
     min_samples: float,
     min_target: float,
     max_dev_bar: float,
+    min_throttle: float = 0.0,
     min_rpm: float = 0.0,
     exclude: np.ndarray | None = None,
     messages: list[str] | None = None,
@@ -69,12 +73,17 @@ def generate_compressor_feedforward(
     if base.shape != (axis_flow.size, axis_ratio.size):
         raise ValueError(f"{base_title}: base map is {base.shape}, axes give {(axis_flow.size, axis_ratio.size)}")
 
-    keep = steady_mask(data, v, min_target=min_target, max_dev_bar=max_dev_bar, min_rpm=min_rpm, exclude=exclude)
+    keep = steady_mask(data, v, min_target=min_target, max_dev_bar=max_dev_bar, min_throttle=min_throttle,
+                       min_rpm=min_rpm, exclude=exclude)
     d = data[keep]
-    rpm_note = f", rpm >= {min_rpm:g}" if min_rpm > 0 else ""
+    notes = ""
+    if min_throttle > 0:
+        notes += f", throttle >= {min_throttle:g} %" if v.get("throttle") in data.columns else ", throttle not logged"
+    if min_rpm > 0:
+        notes += f", rpm >= {min_rpm:g}"
     messages.append(
         f"Feed-forward: {len(d)} steady rows of {len(data)} (target >= {min_target:g} bar, "
-        f"|deviation| <= {max_dev_bar:g} bar{rpm_note})."
+        f"|deviation| <= {max_dev_bar:g} bar{notes})."
     )
     if len(d) == 0:
         raise ValueError("No steady rows with an active boost target for the feed-forward correction.")

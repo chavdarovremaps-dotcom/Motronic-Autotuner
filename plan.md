@@ -48,9 +48,10 @@ family means one `TargetMap` line and one generator wrapper.
   presets keep MATLAB spellings (`ALIGN_TIMESTAMPS`, `CWLDIMX`, ...).
 - Excel blocks go on sheets by area: Boost, Ignition, Fueling, Airflow. The
   comparison tools read every sheet.
-- MG1 compressor feed-forward gates: target at least 0.2 bar (controller
-  active), |deviation| at most 0.05 bar, no gear change within 0.5 s,
-  optional rpm floor (0 = off). No pedal or throttle condition. A missing
+- MG1 compressor feed-forward gates: boost request above 0.5 bar and
+  throttle above 70 % (both parameters), |deviation| at most 0.05 bar, no
+  gear change within 0.5 s, optional rpm floor (0 = off). The pedal is not
+  a condition. A missing
   deviation channel is derived as target minus boost at ingest.
 - Behaviour changes made on purpose versus MATLAB: the Percent trim mode
   works; the warmup hot threshold and the KFZW VVT split follow the fields

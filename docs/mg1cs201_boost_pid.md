@@ -176,12 +176,12 @@ definitions hold flow as integer g/s or ratio times 1000.
 
 - Imports the four tables above plus the timing and fuel scalar maps from the
   XDF and bin.
-- *Compressor feed-forward correction*: rows where the boost target is at
-  least 0.2 bar (controller active, parameter), the deviation is within 0.05
-  bar (settled, parameter) and no gear change happened within 0.5 s; an
-  optional minimum rpm, off by default. Pedal and throttle are not
-  conditions, so steady part-throttle boost requests fill the low-ratio,
-  low-flow cells. After-P-D minus base is averaged per cell on setpoint
+- *Compressor feed-forward correction*: rows where the boost request is
+  above 0.5 bar and the throttle above 70 % (both parameters), the
+  deviation is within 0.05 bar (settled, parameter) and no gear change
+  happened within 0.5 s; an optional minimum rpm, off by default. The
+  accelerator pedal is not a condition: at half pedal the DME still
+  requests boost. After-P-D minus base is averaged per cell on setpoint
   ratio by MAF req. WGDC (at least 2 samples, parameter) and added to the
   base table. Reports the steady P and I per gear as the score. When the
   log has no deviation channel it is calculated as target minus boost.
