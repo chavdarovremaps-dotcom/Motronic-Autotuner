@@ -25,15 +25,20 @@ def map_lookup(values: np.ndarray, axis_x: np.ndarray, axis_y: np.ndarray, x: np
     return f(np.column_stack([yc, xc]))
 
 
-def steady_mask(data: pd.DataFrame, v: dict[str, str], *, min_pedal: float, max_dev_bar: float, min_rpm: float,
-                exclude: np.ndarray | None = None) -> np.ndarray:
-    """Wide-open, on-target rows. The throttle must be open too when it is
-    logged (a shift closes it while the pedal stays floored); ``exclude``
-    drops extra rows such as those around a gear change."""
-    pedal = column(data, v["pedal"]) if v.get("pedal") in data.columns else np.full(len(data), 100.0)
-    keep = (pedal >= min_pedal) & (np.abs(column(data, v["boost_dev"])) <= max_dev_bar) & (column(data, v["rpm"]) >= min_rpm)
-    if v.get("throttle") in data.columns:
-        keep &= column(data, v["throttle"]) >= min_pedal
+def steady_mask(data: pd.DataFrame, v: dict[str, str], *, min_target: float, max_dev_bar: float,
+                min_rpm: float = 0.0, exclude: np.ndarray | None = None) -> np.ndarray:
+    """Rows where the boost controller is active and settled.
+
+    Active: the boost target is at least ``min_target`` bar (below that the
+    DME requests nothing and the P, I and D terms carry no information about
+    the table). Settled: |deviation| within ``max_dev_bar``. Pedal and
+    throttle are not conditions, so part-throttle boost requests count too;
+    that is how the low-ratio, low-flow cells of the table get data.
+    ``exclude`` drops extra rows such as those around a gear change.
+    """
+    keep = (column(data, v["boost_target"]) >= min_target) & (np.abs(column(data, v["boost_dev"])) <= max_dev_bar)
+    if min_rpm > 0:
+        keep &= column(data, v["rpm"]) >= min_rpm
     if exclude is not None:
         keep &= ~np.asarray(exclude, dtype=bool)
     return keep
@@ -48,14 +53,15 @@ def generate_compressor_feedforward(
     axis_ratio: np.ndarray,
     axis_flow: np.ndarray,
     min_samples: float,
-    min_pedal: float,
+    min_target: float,
     max_dev_bar: float,
-    min_rpm: float,
+    min_rpm: float = 0.0,
     exclude: np.ndarray | None = None,
     messages: list[str] | None = None,
 ) -> list[CalibrationMap]:
-    """Average (after P-D minus base) in steady wide-open rows per cell of the
-    compressor characteristic (x = setpoint ratio, y = MAF req. WGDC) and add it."""
+    """Average (after P-D minus base) in steady, controller-active rows per
+    cell of the compressor characteristic (x = setpoint ratio, y = MAF req.
+    WGDC) and add it."""
     messages = messages if messages is not None else []
     axis_ratio = np.asarray(axis_ratio, dtype=float).ravel()
     axis_flow = np.asarray(axis_flow, dtype=float).ravel()
@@ -63,14 +69,15 @@ def generate_compressor_feedforward(
     if base.shape != (axis_flow.size, axis_ratio.size):
         raise ValueError(f"{base_title}: base map is {base.shape}, axes give {(axis_flow.size, axis_ratio.size)}")
 
-    keep = steady_mask(data, v, min_pedal=min_pedal, max_dev_bar=max_dev_bar, min_rpm=min_rpm, exclude=exclude)
+    keep = steady_mask(data, v, min_target=min_target, max_dev_bar=max_dev_bar, min_rpm=min_rpm, exclude=exclude)
     d = data[keep]
+    rpm_note = f", rpm >= {min_rpm:g}" if min_rpm > 0 else ""
     messages.append(
-        f"Feed-forward: {len(d)} steady rows of {len(data)} (pedal >= {min_pedal:g} %, |deviation| <= {max_dev_bar:g} bar, "
-        f"rpm >= {min_rpm:g})."
+        f"Feed-forward: {len(d)} steady rows of {len(data)} (target >= {min_target:g} bar, "
+        f"|deviation| <= {max_dev_bar:g} bar{rpm_note})."
     )
     if len(d) == 0:
-        raise ValueError("No steady wide-open rows for the feed-forward correction.")
+        raise ValueError("No steady rows with an active boost target for the feed-forward correction.")
 
     effort = column(d, v["comp_pd"]) - column(d, v["comp_base"])
     err, counts = bilinear(column(d, v["ratio_target"]), column(d, v["maf_req"]), effort, axis_ratio, axis_flow, min_samples)

@@ -176,17 +176,29 @@ definitions hold flow as integer g/s or ratio times 1000.
 
 - Imports the four tables above plus the timing and fuel scalar maps from the
   XDF and bin.
-- *Compressor feed-forward correction*: steady wide-open rows, deviation
-  within a threshold, averaged after-P-D minus base per cell on setpoint
-  ratio by MAF req. WGDC, added to the base table. Reports the steady P and I
-  per gear as the score.
+- *Compressor feed-forward correction*: rows where the boost target is at
+  least 0.2 bar (controller active, parameter), the deviation is within 0.05
+  bar (settled, parameter) and no gear change happened within 0.5 s; an
+  optional minimum rpm, off by default. Pedal and throttle are not
+  conditions, so steady part-throttle boost requests fill the low-ratio,
+  low-flow cells. After-P-D minus base is averaged per cell on setpoint
+  ratio by MAF req. WGDC (at least 2 samples, parameter) and added to the
+  base table. Reports the steady P and I per gear as the score. When the
+  log has no deviation channel it is calculated as target minus boost.
 - *P chain check*: reproduces the logged P term from the P factor and P
   correction tables and reports the correlation and the median ratio, so a
   wrong axis or channel is caught before any edit.
 - Rows within 0.5 s of a gear change (parameter) are ignored by the
-  feed-forward and by the fuel scalar correction; the steady mask also needs
-  the throttle open when it is logged. The fuel scalar error is STFT plus
-  LTFT when LTFT is logged, without fuel-cut rows (AFR above 16, parameter).
+  feed-forward and by the fuel scalar correction. The fuel scalar error is
+  STFT plus LTFT when LTFT is logged, without fuel-cut rows (AFR above 16,
+  parameter).
+
+To fill the whole compressor table the logs must contain steady driving at
+small boost targets: hold a part-throttle position that asks for 0.3 to
+1.0 bar for several seconds at a time, in a high gear and at several engine
+speeds. In the 2026-09-23 logs the target was either zero (3300 of 3840
+rows) or a full-throttle 1.2 to 1.7 bar; the 130 part-throttle rows were
+all tip-ins, so only 17 of 320 cells had data whatever the gates.
 
 Planned: a boost response report per pull, with rise time, overshoot,
 settling and oscillation, and guided scaling of the P correction and P

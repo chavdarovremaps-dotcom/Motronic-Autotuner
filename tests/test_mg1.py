@@ -105,8 +105,9 @@ def test_compressor_feedforward_and_p_chain(tmp_path):
     ratio = rng.uniform(2.0, 3.0, n); flow = rng.uniform(300, 500, n)
     effort = 2.0 + 0.01 * (flow - 400)                                   # what P and I had to add, kW
     dev = np.where(np.arange(n) % 5 == 0, rng.uniform(-0.4, 0.4, n), 0.01)   # every 5th row is transient
+    target = np.where(np.arange(n) % 7 == 0, 0.05, 1.2)                      # every 7th row: no boost requested
     data = pd.DataFrame({
-        "RPM": rng.uniform(3500, 6500, n), "Accel Ped. Pos.": 100.0, "Boost deviation": dev,
+        "RPM": rng.uniform(3500, 6500, n), "Accel Ped. Pos.": 100.0, "Boost deviation": dev, "Boost target": target,
         "Boost setpoint factor": ratio, "MAF req. WGDC": flow, "MAF REQ (P corr.)": flow,
         "Compressor base": map_lookup(base, ratio_axis, flow_axis, ratio, flow),
         "Gear": 4, "WGDC I-factor": -1.0, "WGDC P-factor": 0.0,
@@ -114,8 +115,8 @@ def test_compressor_feedforward_and_p_chain(tmp_path):
     data["Compressor after P-D"] = data["Compressor base"] + effort
     msgs = []
     maps = generate_compressor_feedforward(data, V, base_map=base, base_title="comp", axis_ratio=ratio_axis,
-                                           axis_flow=flow_axis, min_samples=1, min_pedal=80, max_dev_bar=0.05,
-                                           min_rpm=3000, messages=msgs)
+                                           axis_flow=flow_axis, min_samples=1, min_target=0.2, max_dev_bar=0.05,
+                                           messages=msgs)
     by = {m.key: m for m in maps}
     err = by["comp_effort"].values
     has = ~np.isnan(err)
@@ -124,6 +125,8 @@ def test_compressor_feedforward_and_p_chain(tmp_path):
     np.testing.assert_allclose(by["comp_corrected"].values[has], base[has] + err[has])
     np.testing.assert_allclose(by["comp_corrected"].values[~has], base[~has])
     assert any("steady rows of 600" in m for m in msgs) and any("gear 4" in m for m in msgs)
+    expected = int(((np.abs(dev) <= 0.05) & (target >= 0.2)).sum())      # settled and requesting boost
+    assert expected < 500 and any(f"{expected} steady rows" in m for m in msgs)
 
     # P chain: make the logged P exactly the product of two tables and check the tool reproduces it
     pfac = np.full((5, 5), 20.0)                                          # kW per bar, flat
@@ -133,3 +136,18 @@ def test_compressor_feedforward_and_p_chain(tmp_path):
     out = p_chain_check(data, V, pfac=pfac, pfac_ratio=ratio_axis, pfac_flow=flow_axis, pcorr=pcorr,
                         pcorr_dev_hpa=pcorr_dev, pcorr_flow=pcorr_flow, messages=msgs)
     assert out["r"] > 0.999 and abs(out["ratio"] - 1.0) < 1e-6
+
+
+def test_missing_deviation_is_derived_from_target_and_boost(tmp_path):
+    """The 'timing pull' logs of 2026-09-23 had no deviation channel at all."""
+    write_mhd_log(tmp_path / "a.csv")
+    df = pd.read_csv(tmp_path / "a.csv", comment="#")
+    df["Boost target RAM (Bar)"] = df["Boost (PSI)"] / 14.5038 + 0.1    # target = boost + 0.1 bar everywhere
+    with open(tmp_path / "a.csv", "w", encoding="utf-8-sig") as f:
+        f.write("#Ecu PRGID: 00005D55465A09\n")
+        df.to_csv(f, index=False, lineterminator="\n")
+    p = make_preset()
+    logs = BOSCH_MG1CS201.ingest(tmp_path, p)
+    assert "Boost deviation" in logs.full.columns
+    np.testing.assert_allclose(logs.full["Boost deviation"], 0.1, atol=1e-4)
+    assert any("not logged: calculated as" in m for m in logs.messages)

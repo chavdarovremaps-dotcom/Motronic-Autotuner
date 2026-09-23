@@ -90,9 +90,11 @@ PARAMS = [
     ParamSpec("wot_min", "WOT minimum pedal (%)", "float", 80.0, group="Log Split", minimum=0, maximum=100),
     ParamSpec("shift_blank", "Ignore rows within (s) of a gear change", "float", 0.5, group="Log Split", decimals=2, minimum=0),
     ParamSpec("boost_min_samples", "Min samples per cell", "int", 2, group="Boost Feed-Forward", minimum=0),
+    ParamSpec("boost_min_target", "Controller active: target above (bar)", "float", 0.2, group="Boost Feed-Forward",
+              decimals=2, minimum=0),
     ParamSpec("boost_max_dev", "Steady state: |deviation| below (bar)", "float", 0.05, group="Boost Feed-Forward",
               decimals=3, minimum=0),
-    ParamSpec("boost_min_rpm", "Steady state: RPM above", "float", 3000.0, group="Boost Feed-Forward", minimum=0),
+    ParamSpec("boost_min_rpm", "Steady state: RPM above (0 = no limit)", "float", 0.0, group="Boost Feed-Forward", minimum=0),
     ParamSpec("knock_source", "Knock signal", "choice", "average", group="Timing Knock Removal",
               choices=(("Average of all cylinders", "average"), ("Worst cylinder (largest retard)", "worst"))),
     ParamSpec("knock_min_samples", "Min samples per cell", "int", 1, group="Timing Knock Removal", minimum=0),
@@ -131,6 +133,16 @@ def knock_signal(data, v: dict[str, str], source: str) -> np.ndarray:
     return stack.max(axis=1) if source == "worst" else stack.mean(axis=1)
 
 
+def derive_boost_deviation(df, preset, messages):
+    """Ingest hook: when the log has no deviation channel, add target minus boost."""
+    v = preset.vars
+    dev, target, boost = v.get("boost_dev"), v.get("boost_target"), v.get("boost")
+    if dev and dev not in df.columns and target in df.columns and boost in df.columns:
+        df[dev] = df[target].astype(float) - df[boost].astype(float)
+        messages.append(f"  -> '{dev}' not logged: calculated as '{target}' - '{boost}'.")
+    return df
+
+
 def _shift_rows(ctx: RunContext, d) -> np.ndarray | None:
     """Rows around a gear change, when gear and time are logged."""
     v = ctx.preset.vars
@@ -156,8 +168,8 @@ def _boost(ctx: RunContext):
     return _on_sheet(generate_compressor_feedforward(
         d, p.vars, base_map=p.base_map("base_comp"), base_title=COMPRESSOR_MAP,
         axis_ratio=p.axis("ratio_comp"), axis_flow=p.axis("maf_comp"),
-        min_samples=float(ctx.p("boost_min_samples", 2)), min_pedal=float(ctx.p("wot_min", 80)),
-        max_dev_bar=float(ctx.p("boost_max_dev", 0.05)), min_rpm=float(ctx.p("boost_min_rpm", 3000)),
+        min_samples=float(ctx.p("boost_min_samples", 2)), min_target=float(ctx.p("boost_min_target", 0.2)),
+        max_dev_bar=float(ctx.p("boost_max_dev", 0.05)), min_rpm=float(ctx.p("boost_min_rpm", 0)),
         exclude=near_shift, messages=ctx.messages,
     ), "Boost")
 
@@ -223,7 +235,7 @@ BOSCH_MG1CS201 = Family(
     var_labels=VAR_LABELS,
     params=PARAMS,
     target_maps=TARGET_MAPS,
-    log_sources=[mhd_log_source(required_channels=("rpm", "load"))],
+    log_sources=[mhd_log_source(required_channels=("rpm", "load"), hooks=(derive_boost_deviation,))],
     generators=[
         GeneratorSpec("boost", "Compressor Feed-Forward Correction", ("full",), ("ratio_comp", "maf_comp"), _boost,
                       required_base_maps=("base_comp",)),
