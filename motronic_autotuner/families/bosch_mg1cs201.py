@@ -89,7 +89,7 @@ DEFAULT_PREP = {"align_timestamps": True, "hack_5120": False, "pressure_columns"
 PARAMS = [
     ParamSpec("wot_min", "WOT minimum pedal (%)", "float", 80.0, group="Log Split", minimum=0, maximum=100),
     ParamSpec("shift_blank", "Ignore rows within (s) of a gear change", "float", 0.5, group="Log Split", decimals=2, minimum=0),
-    ParamSpec("boost_min_samples", "Min samples per cell", "int", 2, group="Boost Feed-Forward", minimum=0),
+    ParamSpec("boost_min_samples", "Min samples per cell", "int", 1, group="Boost Feed-Forward", minimum=0),
     ParamSpec("boost_min_target", "Boost request above (bar)", "float", 0.5, group="Boost Feed-Forward",
               decimals=2, minimum=0),
     ParamSpec("boost_min_throttle", "Throttle above (%)", "float", 70.0, group="Boost Feed-Forward",
@@ -170,7 +170,7 @@ def _boost(ctx: RunContext):
     return _on_sheet(generate_compressor_feedforward(
         d, p.vars, base_map=p.base_map("base_comp"), base_title=COMPRESSOR_MAP,
         axis_ratio=p.axis("ratio_comp"), axis_flow=p.axis("maf_comp"),
-        min_samples=float(ctx.p("boost_min_samples", 2)), min_target=float(ctx.p("boost_min_target", 0.5)),
+        min_samples=float(ctx.p("boost_min_samples", 1)), min_target=float(ctx.p("boost_min_target", 0.5)),
         max_dev_bar=float(ctx.p("boost_max_dev", 0.05)), min_throttle=float(ctx.p("boost_min_throttle", 70)),
         min_rpm=float(ctx.p("boost_min_rpm", 0)),
         exclude=near_shift, messages=ctx.messages,

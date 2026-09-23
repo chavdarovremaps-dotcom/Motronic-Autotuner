@@ -95,6 +95,15 @@ and the P, D, I terms per pull in a new GUI tab; write the numbers to the
 Excel. First data: the B58 Turbosystems stage 3 logs the user records on
 2026-09-23 and the four G05 40i logs from 2026-09-08.
 
+v3 logs (same day, `...\Tune for 95 on Map 1\v3\`, v3.bin with the
+user's rebuilt compressor table): 54 cells corrected, mid ratios 0.5 to
+0.85 kW too high, top ratios 0.7 to 1.07 kW too low; 3rd gear runs 0.05
+to 0.11 bar under target at high rpm with duty at 80 % and I at 0. P and
+D left alone until the compressor table is pasted and relogged. Min
+samples per cell for the feed-forward now defaults to 1. Stage 2 must cut
+each pull where the target starts dropping, since the "overshoots" seen
+so far are lifts and shifts.
+
 Stage 3 after that: guided scaling of the P correction and P factor tables
 from the stage 2 numbers, with the factor shown and editable.
 

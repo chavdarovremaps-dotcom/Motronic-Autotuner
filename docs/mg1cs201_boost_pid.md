@@ -155,6 +155,33 @@ Also seen: the logged P term follows "Boost deviation RAM" better than the
 filtered "Boost deviation" (0.97 against 0.92 on the reference log), so log
 the RAM variant.
 
+### v3 logs, later on 2026-09-23
+
+Eight logs, 8600 rows at about 6 Hz (47 channels), on the v3 bin: the user
+raised the boost limit and rebuilt the compressor table (300 cells, up to
++9.3 kW, flow axis to 500 g/s). P and D tables unchanged.
+
+| Observation | Value |
+| --- | --- |
+| Steady rows (target above 0.5 bar, throttle above 70 %, settled) | 710 of 8625, 54 cells |
+| Feed-forward error, ratio 1.7 to 2.4, flow 250 to 390 g/s | -0.5 to -0.85 kW (table too high) |
+| Feed-forward error, ratio 2.65 to 3.1, flow 390 to 500 g/s | +0.7 to +1.07 kW (table too low) |
+| Steady I per gear | +0.2 to +0.9 % |
+| Part-throttle hold at 0.8 bar target, 5th gear | boost 0.78 to 0.86, I wound to -6.8 % |
+| 3rd gear 4400 to 6800 rpm, target 1.55 to 1.61 | 0.05 to 0.11 bar under target the whole pull, duty 80 %, I stayed 0 |
+| D term in active rows | mean 0.09 kW, non-zero in 28 % of rows |
+
+The large "overshoots" the per-pull numbers show (+0.3 to +0.7 bar) are
+all lifts and shifts: the target drops before the throttle does and the
+charge pipe holds pressure for a few samples. Inside the pulls the boost
+tracks within 0.05 bar except the 3rd gear deficit above.
+
+Decision: P and D stay as they are. First paste the corrected compressor
+table (mid ratios down, top ratios up), relog, and only if the high-rpm
+deficit in 3rd and 4th survives raise the positive side of the P
+correction between +50 and +150 hPa. D is nearly inactive and there is no
+oscillation to damp.
+
 ## Relog protocol
 
 20 Hz or faster. Same road and gears. Wide open from about 2000 rpm in each
