@@ -78,7 +78,8 @@ def read_logger_csv(path: str | Path) -> pd.DataFrame:
         skipinitialspace=True,
         low_memory=False,
     )
-    df.columns = [str(c).strip() for c in df.columns]
+    # a UTF-8 byte order mark read as latin-1 lands on the first column name
+    df.columns = [str(c).strip().replace("\ufeff", "").replace("\u00ef\u00bb\u00bf", "") for c in df.columns]
     for c in df.columns:
         if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c]):
             s = df[c].astype(str).str.strip().str.upper()
@@ -89,6 +90,28 @@ def read_logger_csv(path: str | Path) -> pd.DataFrame:
     # do not wipe every row in dropna()
     unnamed = [c for c in df.columns if c.startswith("Unnamed:") and df[c].isna().all()]
     return df.drop(columns=unnamed)
+
+
+def read_vehicle_logger_csv(path: str | Path) -> pd.DataFrame:
+    """Read an Opel vehicle-logger CSV: header of RAM names, a row of German
+    descriptions, a units row, then data with the elapsed time in ms.
+
+    Same cleaning as :func:`read_logger_csv`; the time column (the first)
+    is converted to seconds when the units row says ``ms`` or, without a
+    units row, when the median step is above five.
+    """
+    path = Path(path)
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+        lines = [f.readline() for _ in range(3)]
+    unit = lines[2].split(",")[0].strip().lower() if len(lines) == 3 else ""
+    df = read_logger_csv(path)
+    if df.shape[1] == 0:
+        return df
+    time_col = df.columns[0]
+    step = df[time_col].dropna().diff().median() if df[time_col].notna().sum() > 1 else 0.0
+    if unit == "ms" or (unit not in ("s", "sec", "sec.ms") and step > 5):
+        df[time_col] = df[time_col] / 1000.0
+    return df
 
 
 def resolve_columns(df: pd.DataFrame, names: list[str]) -> pd.DataFrame:

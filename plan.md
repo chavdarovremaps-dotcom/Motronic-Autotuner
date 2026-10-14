@@ -17,6 +17,7 @@ the design overview is the Claude doc "Motronic Autotuner Overview".
 | MS43 data | `C:\Users\chavd\OneDrive\Desktop\_Files\bmw e36 ms43 2.5\` (bin, `long.csv`, `logs_for_calib\`); XDF and ADX in `D:\Repos\BMW-XDFs\MS43\` |
 | MG1CS201 reference | `Scripts/MG1CS201/` (XDF 00005D55465A09, `map2 activated.bin`, one MHD log); more MHD logs and bins in `...\_Files\bmw g05 40i turbosystems\` |
 | B58/S58 definitions | `D:\Repos\BMW-XDFs\` (MHD+ XDFs with original bins per PRGID) |
+| ME7.6.2 Opel data | `C:\Users\chavd\OneDrive\Desktop\_Files\astra h 2.0 hybrid\` (three vehicle-logger CSVs from 2026-10-14, a WinOLS bin; no WinOLS CSV export yet) |
 
 ## Architecture in one paragraph
 
@@ -63,11 +64,23 @@ family means one `TargetMap` line and one generator wrapper.
 | --- | --- | --- | --- | --- |
 | Bosch ME7 | WinOLS CSV export | ME7-Logger, TunerPro | boost, handover, warmup, fuel, ignition, manifold model | identical to MATLAB on real logs |
 | Siemens MS43 (MS4X) | XDF + bin | TunerPro RT (ON/OFF flags) | closed-loop VE (trims or wideband, paste-ready corrected tables), knock removal on ip_iga_ron98_pl__n__maf | unit tests; VANOS limp-home warning on import |
+| Bosch ME7.6.2 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger: RAM names, German descriptions, units row, time in ms | the ME7 six on Opel names (nmot, rl_w, wped, pvdkds_w, ps_w, ldtvm, tevfa_w, frm_w, fra_w, tmot, wkrm); overrun rows dropped; modelled-ps_w warning | unit tests; ingest run on the three Astra logs, no maps yet |
 | Bosch MG1CS201 (MHD) | XDF + bin | MHD | timing knock removal on main 1/2 and cold 1/2 (average or worst cylinder), Fuel scalar 1 from STFT + LTFT without fuel-cut and shift rows, compressor feed-forward + P chain check; rows near gear changes ignored | unit tests; run on the reference log and on the 2026-09-23 stage 3 logs |
 
-Not started: MED9 (ME7 set plus KFLDHBN, KFVPDKSE with an extra tab), ME7.6
-and ME1.5 Opel (two log sources each: OP-COM or vehicle logger), ME3.8,
+Not started: MED9 (ME7 set plus KFLDHBN, KFVPDKSE with an extra tab), the
+OP-COM log source for ME7.6.2, ME1.5 Opel (OP-COM or vehicle logger), ME3.8,
 MED17.
+
+ME7.6.2 notes (2026-10-14): the Astra logs show rl_w, ml_w and ps_w
+inflated on overrun (HFM measures the blow-off flow with the throttle
+shut), hence the overrun filter (pedal below 2 % above 1200 rpm, both
+parameters). ps_w sits above pvdkds_w in part of the rows, so it is a
+modelled value and KFURL / KFPRG from it only reproduce the file; the app
+warns on import. wkrm is logged with a negative sign for retard (-0.0 in
+the files); dwkrz[0..3] per cylinder exist and are not used yet. pu is not
+logged, so CWLDIMX cannot be used until it is. Open: confirm wped (pedal)
+rather than wdk1 (throttle) for the WOT split, tevfa_w as the FKKVS te axis,
+and the WinOLS map names of the ME7.6.2 file.
 
 ## MG1CS201 boost: where we are
 

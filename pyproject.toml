@@ -18,6 +18,7 @@ dev = ["pytest>=8", "pyinstaller>=6"]
 motronic-me7 = "motronic_autotuner.apps.me7:main"
 motronic-ms43 = "motronic_autotuner.apps.ms43:main"
 motronic-mg1 = "motronic_autotuner.apps.mg1:main"
+motronic-me762-vehicle = "motronic_autotuner.apps.me762_vehicle:main"
 
 [build-system]
 requires = ["setuptools>=68"]
