@@ -17,6 +17,7 @@ the design overview is the Claude doc "Motronic Autotuner Overview".
 | MS43 data | `C:\Users\chavd\OneDrive\Desktop\_Files\bmw e36 ms43 2.5\` (bin, `long.csv`, `logs_for_calib\`); XDF and ADX in `D:\Repos\BMW-XDFs\MS43\` |
 | MG1CS201 reference | `Scripts/MG1CS201/` (XDF 00005D55465A09, `map2 activated.bin`, one MHD log); more MHD logs and bins in `...\_Files\bmw g05 40i turbosystems\` |
 | B58/S58 definitions | `D:\Repos\BMW-XDFs\` (MHD+ XDFs with original bins per PRGID) |
+| ME1.5.5 Opel data | `C:\Users\chavd\OneDrive\Desktop\_Files\opel astra g 2.0 z20let 630cc td04 19t\` (Z20LET, SW 1037360526; `logs\` with one vehicle-logger CSV from 2026-10-15, WinOLS bins, id files; no WinOLS CSV export yet) |
 | ME7.6.2 Opel data | `C:\Users\chavd\OneDrive\Desktop\_Files\astra h 2.0 hybrid\` (three vehicle-logger CSVs from 2026-10-14, a WinOLS bin; no WinOLS CSV export yet) |
 
 ## Architecture in one paragraph
@@ -64,12 +65,22 @@ family means one `TargetMap` line and one generator wrapper.
 | --- | --- | --- | --- | --- |
 | Bosch ME7 | WinOLS CSV export | ME7-Logger, TunerPro | boost, handover, warmup, fuel, ignition, manifold model | identical to MATLAB on real logs |
 | Siemens MS43 (MS4X) | XDF + bin | TunerPro RT (ON/OFF flags) | closed-loop VE (trims or wideband, paste-ready corrected tables), knock removal on ip_iga_ron98_pl__n__maf | unit tests; VANOS limp-home warning on import |
+| Bosch ME1.5.5 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger, same shape and RAM names as ME7.6.2 | the ME7 six via `families/opel_vehicle.py`; knock from wkrm or worst cylinder (dwkrz_0_A..3_A); overrun rows dropped; zero-WGDC and modelled-ps_w warnings | unit tests; ingest run on the one Astra G log, no maps yet |
 | Bosch ME7.6.2 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger: RAM names, German descriptions, units row, time in ms | the ME7 six on Opel names (nmot, rl_w, wped, pvdkds_w, ps_w, ldtvm, tevfa_w, frm_w, fra_w, tmot, wkrm); overrun rows dropped; modelled-ps_w warning | unit tests; ingest run on the three Astra logs, no maps yet |
 | Bosch MG1CS201 (MHD) | XDF + bin | MHD | timing knock removal on main 1/2 and cold 1/2 (average or worst cylinder), Fuel scalar 1 from STFT + LTFT without fuel-cut and shift rows, compressor feed-forward + P chain check; rows near gear changes ignored | unit tests; run on the reference log and on the 2026-09-23 stage 3 logs |
 
 Not started: MED9 (ME7 set plus KFLDHBN, KFVPDKSE with an extra tab), the
-OP-COM log source for ME7.6.2, ME1.5 Opel (OP-COM or vehicle logger), ME3.8,
-MED17.
+OP-COM log source for ME1.5.5 and ME7.6.2, ME3.8, MED17.
+
+ME1.5.5 notes (2026-10-15): the shared Opel declaration lives in
+`families/opel_vehicle.py`; ME1.5.5 and ME7.6.2 differ only in the
+per-cylinder knock channel names. The Astra G log (TD04-19T, 630 cc
+injectors) has ldtvm at zero throughout, so boost maps from it are
+meaningless until the wastegate is driven (ask whether the "v2 0wgdc"
+file is deliberate); ps_w behaves like a sensor there (never above
+pvdkds_w); real knock: wkrm to -4.5 deg, cylinder 1 to -6 deg, 400 of
+1116 rows. The ME7.6.2 doubts (wped vs wdk1 for WOT, tevfa_w as te axis,
+map names) apply to both.
 
 ME7.6.2 notes (2026-10-14): the Astra logs show rl_w, ml_w and ps_w
 inflated on overrun (HFM measures the blow-off flow with the throttle

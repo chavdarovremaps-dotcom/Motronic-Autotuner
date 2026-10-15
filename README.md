@@ -21,13 +21,14 @@ pip install -e .[dev]
 
 ```bash
 python -m motronic_autotuner.apps.me7            # Bosch ME7, maps from a WinOLS export
-python -m motronic_autotuner.apps.me762_vehicle  # Bosch ME7.6.2 Opel on vehicle-logger CSVs, WinOLS export
+python -m motronic_autotuner.apps.me155_vehicle  # Bosch ME1.5.5 Opel (Z20LET) on vehicle-logger CSVs, WinOLS export
+python -m motronic_autotuner.apps.me762_vehicle  # Bosch ME7.6.2 Opel (Z20LEH) on vehicle-logger CSVs, WinOLS export
 python -m motronic_autotuner.apps.ms43           # Siemens MS43 (MS4X firmware), maps from XDF + bin
 python -m motronic_autotuner.apps.mg1            # Bosch MG1CS201 (B58) on MHD logs, maps from XDF + bin
 ```
 
-Or double-click `run_me7.bat`, `run_me762_vehicle.bat`, `run_ms43.bat` or
-`run_mg1.bat` in the repo root.
+Or double-click `run_me7.bat`, `run_me155_vehicle.bat`, `run_me762_vehicle.bat`,
+`run_ms43.bat` or `run_mg1.bat` in the repo root.
 
 Workflow, tab by tab:
 
