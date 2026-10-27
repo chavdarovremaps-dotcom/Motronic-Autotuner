@@ -60,16 +60,15 @@ class IngestSettings:
 def read_logger_csv(path: str | Path) -> pd.DataFrame:
     """Read one logger CSV into an all-numeric frame.
 
-    Handles the shapes seen so far: ME7-Logger (header, units row, alias row,
-    data), TunerPro (one title line above the header, a units row, ON/OFF
-    text columns) and plain CSV. ON/OFF flags become 1/0, every other column
-    is coerced to numbers, so units and alias rows become NaN and are dropped
-    by the caller.
+    Handles the shapes seen so far: raw ME7-Logger (a preamble of ECU
+    identification lines, then the ``TimeStamp`` header, units row, alias
+    row, data), the same without the preamble, TunerPro (one title line
+    above the header, a units row, ON/OFF text columns) and plain CSV.
+    ON/OFF flags become 1/0, every other column is coerced to numbers, so
+    units and alias rows become NaN and are dropped by the caller.
     """
     path = Path(path)
-    with open(path, "r", encoding="latin-1", errors="replace") as f:
-        first = f.readline()
-    skip = 1 if "TunerPro" in first else 0
+    skip = header_line(path)
     df = pd.read_csv(
         path,
         skiprows=skip,
@@ -90,6 +89,26 @@ def read_logger_csv(path: str | Path) -> pd.DataFrame:
     # do not wipe every row in dropna()
     unnamed = [c for c in df.columns if c.startswith("Unnamed:") and df[c].isna().all()]
     return df.drop(columns=unnamed)
+
+
+PREAMBLE_LIMIT = 200
+"""How many lines to scan for the header of a logger file."""
+
+
+def header_line(path: Path) -> int:
+    """Index of the header row: 1 after a TunerPro title line, the first line
+    starting with ``TimeStamp`` for ME7-Logger files (raw ones carry about
+    twenty identification lines first), otherwise 0."""
+    with open(path, "r", encoding="latin-1", errors="replace") as f:
+        for i, line in enumerate(f):
+            if i >= PREAMBLE_LIMIT:
+                break
+            s = line.strip()
+            if i == 0 and "TunerPro" in s:
+                return 1
+            if s.lower().startswith("timestamp"):
+                return i
+    return 0
 
 
 def read_vehicle_logger_csv(path: str | Path) -> pd.DataFrame:
@@ -183,7 +202,11 @@ def process_raw_logs(
     temp_col, time_col = preset.var("tmot"), preset.var("time")
 
     for path in files:
-        df = reader(path)
+        try:
+            df = reader(path)
+        except (pd.errors.ParserError, UnicodeDecodeError, ValueError) as exc:
+            log.append(f"  -> [SKIP] {path.name}: not a log this reader understands ({exc}).")
+            continue
         if fuzzy_columns:
             df = resolve_columns(df, [v for v in preset.vars.values() if v])
         if len(df) > 1:

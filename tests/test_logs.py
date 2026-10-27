@@ -5,11 +5,26 @@ from motronic_autotuner.core.logs import IngestSettings, process_raw_logs, read_
 from motronic_autotuner.families.bosch_me7 import BOSCH_ME7
 
 
-def write_me7_log(path, n=40, start_time=0.0, pedal=90.0, temp=95.0, incomplete_tail=True):
+ME7_LOGGER_PREAMBLE = [
+    "", "#" * 83, "Logfile created by ME7-Logger v1.20 (c) mki, 12/2010-07/2013", "",
+    "Used EcuDefinition file: WinOLS (Audi A3 (Version 5) - 362287).ecu", "",
+    "ECU identified with following data:",
+    "HWNumber    = 0261207436       (requested was 0261207436)",
+    "SWNumber    = 1037362287       (requested was 1037362287)",
+    "PartNumber  = 06A906032HJ      (requested was 06A906032HJ)",
+    "SWVersion   = 0002             (requested was 0002)",
+    "EngineId    = 1.8L R4/5VT      (requested was 1.8L R4/5VT)",
+    "VAGHWNumber = ", "ModelId     = ", "",
+    "Log packet size: 80 bytes", "Logging with:    30 samples/second", "Used speed is:   56000 baud",
+    "Used mode is:    HM0", "Log started at:  27.10.2026 11:03:16.316", "",
+]
+
+
+def write_me7_log(path, n=40, start_time=0.0, pedal=90.0, temp=95.0, incomplete_tail=True, preamble=False):
     header = "TimeStamp, nmot_w    , wdkba     , tmotlin   , pvdks_w   , ldtvm     ,"
     units = "  sec.ms , rpm       , DK        , \xb0C        , mbar      , -         ,"
     alias = "TIME,EngineSpeed,Throttle,CoolantTemp,Boost,WGDC,"
-    rows = [header, units, alias]
+    rows = (list(ME7_LOGGER_PREAMBLE) if preamble else []) + [header, units, alias]
     for i in range(n):
         t = start_time + i * 0.1
         rows.append(f"{t:.3f},{2000 + i * 10},{pedal},{temp},{1500 + i},{50},")
@@ -79,3 +94,19 @@ def test_required_columns_keep_rows_with_other_nans(tmp_path):
                             required_columns=["nmot_w"])
     # last row dropped as incomplete tail, one row dropped for NaN rpm, NaN in 'extra' kept
     assert logs.counts()["full"] == 3
+
+
+def test_raw_me7_logger_preamble_is_skipped(tmp_path):
+    p = tmp_path / "log_4cyl_basic.csv"
+    write_me7_log(p, n=5, preamble=True)
+    df = read_logger_csv(p)
+    assert list(df.columns) == ["TimeStamp", "nmot_w", "wdkba", "tmotlin", "pvdks_w", "ldtvm"]
+    assert len(df.dropna()) == 5
+
+
+def test_foreign_csv_in_the_folder_is_reported_not_fatal(tmp_path):
+    write_me7_log(tmp_path / "a.csv", n=30, preamble=True)
+    (tmp_path / "WinOLS(Audi A3).bin.csv").write_text("a;b\n1;2\n3;4;5;6;7;8\n", encoding="latin-1")
+    logs = process_raw_logs(tmp_path, BOSCH_ME7.default_preset(), IngestSettings())
+    assert logs.counts()["full"] == 30
+    assert any("[SKIP] WinOLS(Audi A3).bin.csv" in m for m in logs.messages)
