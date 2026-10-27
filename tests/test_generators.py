@@ -9,7 +9,7 @@ from motronic_autotuner.families.bosch_me7 import BOSCH_ME7, DEFAULT_VARS
 from motronic_autotuner.generators.boost import generate_boost_maps
 from motronic_autotuner.generators.handover import generate_kfvpdksd, generate_handover_maps
 from motronic_autotuner.generators.ignition import generate_kfzw
-from motronic_autotuner.generators.manifold import generate_manifold_maps
+from motronic_autotuner.generators.manifold import generate_manifold_maps, generate_pbrk_maps
 from motronic_autotuner.generators.warmup import generate_warmup_maps
 
 V = DEFAULT_VARS
@@ -157,3 +157,96 @@ def test_near_gear_change_blanks_both_sides():
     near = near_gear_change(gear, t, 0.25)
     assert near.tolist() == [i in (8, 9, 10, 11, 12) for i in range(20)]
     assert not near_gear_change(gear, t, 0.0).any()
+
+
+AXIS_LOAD_PBRK = np.array([50, 60, 65, 70, 75, 80, 90, 100, 120, 140.0])
+AXIS_RPM_PBRK = np.array([1000, 1520, 2000, 2520, 3000, 3520, 4500, 6000, 6500.0])
+
+
+def nonlinear_log(n=40000, seed=5, vvt_on=False):
+    """The line holds up to 1300 hPa; above it the chamber sees 0.95 of the manifold
+    pressure, so the load bends: rl = 0.08 * (ps * f - 50)."""
+    rng = np.random.default_rng(seed + 100)        # not the stream synthetic_log drew rpm from
+    d = synthetic_log(n, seed)
+    ps = rng.uniform(300, 2200, n)
+    f_true = np.where(ps > 1300, 0.95, 1.0)
+    d[V["ps_w"]] = ps
+    d[V["load"]] = 0.08 * (ps * f_true - 50) + rng.normal(0, 0.3, n)
+    d[V["vvt"]] = rng.choice([0.0, 22.0], n) if vvt_on else 0.0
+    return d
+
+
+def fit_and_correct(data, *, vvt_enabled=False, fit_load_max=90.0, apply_to="pressure", nw=False):
+    msgs = []
+    fit = generate_manifold_maps(data, V, min_samples=5, vvt_enabled=vvt_enabled, vvt_threshold=18,
+                                 axis_rpm=AXIS_RPM, fit_load_max=fit_load_max, messages=msgs)
+    by = {m.key: m for m in fit}
+    maps = generate_pbrk_maps(data, V, kfurl=by["kfurl"].values, kfprg=by["kfprg"].values, axis_rpm_fit=AXIS_RPM,
+                              vvt_enabled=vvt_enabled, vvt_threshold=18, axis_rpm=AXIS_RPM_PBRK, axis_load=AXIS_LOAD_PBRK,
+                              base_map=np.ones((AXIS_RPM_PBRK.size, AXIS_LOAD_PBRK.size)),
+                              axis_rpm_nw=AXIS_RPM_PBRK if nw else None, axis_load_nw=AXIS_LOAD_PBRK if nw else None,
+                              base_map_nw=None, min_samples=3, apply_to=apply_to, messages=msgs)
+    return by, {m.key: m for m in maps}, msgs
+
+
+def test_pbrk_factor_recovers_the_bend():
+    by, out, msgs = fit_and_correct(nonlinear_log())
+    # the line fitted below 90 % load is the true one
+    np.testing.assert_allclose(by["kfurl"].values[:, 0], 0.08, rtol=0.03)
+    np.testing.assert_allclose(by["kfprg"].values[:, 0], 50, atol=15)
+    f = out["kfpbrk"].values                                   # rows = rpm, cols = load
+    low = f[:, AXIS_LOAD_PBRK <= 80]
+    high = f[:, AXIS_LOAD_PBRK >= 120]
+    np.testing.assert_allclose(low[~np.isnan(low)], 1.0, atol=0.01)
+    np.testing.assert_allclose(high[~np.isnan(high)], 0.95, atol=0.01)
+    assert out["kfpbrk"].counts is not None and out["kfpbrk"].x_axis.tolist() == AXIS_LOAD_PBRK.tolist()
+    # the paste-ready map keeps the factory value (1.0) where there is no data, and the check improves
+    corrected = out["kfpbrk_corrected"].values
+    assert not np.isnan(corrected).any() and (corrected[np.isnan(f)] == 1.0).all()
+    check = out["pbrk_check"].values
+    assert out["pbrk_check"].y_axis == ["VVT OFF: before KFPBRK (hPa RMS)", "VVT OFF: after KFPBRK (hPa RMS)"]
+    ok = ~np.isnan(check[0])
+    assert (check[1][ok] < check[0][ok]).all() and check[0][ok].max() > 20
+    assert "kfpbrknw" not in out and any("KFPBRK: " in m and "cells from" in m for m in msgs)
+
+
+def test_pbrk_load_mode_and_the_vvt_on_map():
+    data = nonlinear_log(vvt_on=True)
+    by, out, msgs = fit_and_correct(data, vvt_enabled=True, apply_to="load", nw=True)
+    assert by["kfurl"].values.shape == (12, 2)
+    for key in ("kfpbrk", "kfpbrknw"):
+        f = out[key].values
+        high = f[:, AXIS_LOAD_PBRK >= 120]
+        # on the load the same bend reads as a factor below one as well, a little further from 0.95
+        assert np.nanmean(high) < 0.97 and np.nanmean(f[:, AXIS_LOAD_PBRK <= 80]) > 0.99
+    assert out["pbrk_check"].values.shape == (4, 12)
+    # without the NW axes the VVT-on rows are skipped with a message
+    _, out2, msgs2 = fit_and_correct(data, vvt_enabled=True, nw=False)
+    assert "kfpbrknw" not in out2 and any("KFPBRKNW: axes not imported" in m for m in msgs2)
+
+
+def test_fit_load_max_falls_back_when_a_bin_has_no_low_loads():
+    data = nonlinear_log()
+    data = data[~((data[V["rpm"]] > 6250) & (data[V["load"]] <= 90))]
+    msgs = []
+    fit = generate_manifold_maps(data, V, min_samples=5, vvt_enabled=False, vvt_threshold=18,
+                                 axis_rpm=AXIS_RPM, fit_load_max=90.0, messages=msgs)
+    kfurl = fit[0].values[:, 0]
+    assert any("[FIT] RPM: 6500" in m and "fitted on all loads" in m for m in msgs)
+    assert not np.isnan(kfurl[-1]) and kfurl[-1] < 0.08          # the bend pulls the all-loads slope down
+
+
+def test_me7_run_all_adds_pbrk_when_its_axes_are_present():
+    preset = BOSCH_ME7.default_preset()
+    preset.axes = {"rpm_url": AXIS_RPM}
+    data = nonlinear_log(n=20000)
+    logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
+    result = BOSCH_ME7.run_all(preset, logs)
+    assert [m.key for m in result.maps] == ["kfurl", "kfprg"]
+    assert any("correction maps skipped" in m for m in result.messages)
+    preset.axes.update({"rpm_pbrk": AXIS_RPM_PBRK, "load_pbrk": AXIS_LOAD_PBRK})
+    preset.base_maps["base_kfpbrk"] = np.ones((AXIS_RPM_PBRK.size, AXIS_LOAD_PBRK.size))
+    result = BOSCH_ME7.run_all(preset, logs)
+    keys = [m.key for m in result.maps]
+    assert keys == ["kfurl", "kfprg", "kfpbrk", "kfpbrk_corrected", "pbrk_check"]
+    assert all(m.sheet == "Airflow" for m in result.maps)

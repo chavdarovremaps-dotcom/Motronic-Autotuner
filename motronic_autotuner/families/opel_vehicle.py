@@ -91,6 +91,11 @@ PARAMS = [
     ParamSpec("ambient_pressure", "Ambient pressure (hPa)", "float", 1000.0, group="General Math & Fuel Settings", minimum=0),
     ParamSpec("temp_max", "Warmup max temp (C)", "float", 80.0, group="General Math & Fuel Settings"),
     ParamSpec("wot_min", "WOT minimum pedal (%)", "float", 70.0, group="General Math & Fuel Settings", minimum=0, maximum=100),
+    ParamSpec("fit_load_max", "Fit KFURL / KFPRG on loads up to (%) (0 = all loads)", "float", 0.0,
+              group="Intake Manifold Model", minimum=0, maximum=400),
+    ParamSpec("pbrk_apply", "KFPBRK factor acts on", "choice", "pressure", group="Intake Manifold Model",
+              choices=(("Manifold pressure before residual gas: rl = (ps x f - KFPRG) x KFURL", "pressure"),
+                       ("Load: rl = (ps - KFPRG) x KFURL x f", "load"))),
     ParamSpec("knock_source", "Knock signal", "choice", "average", group="Ignition Knock",
               choices=(("Average of all cylinders (wkrm)", "average"), ("Worst cylinder (dwkrz per cylinder)", "worst"))),
     ParamSpec("overrun_pedal", "Overrun filter: drop rows with pedal below (%) (0 = off)", "float", 2.0,
@@ -189,7 +194,7 @@ GENERATORS = [
                   ("rpm_kffwlw", "load_kffwlw", "tmot"), me7._warmup),
     GeneratorSpec("fuel", "Fuel Trim (FKKVS)", ("hot",), ("rpm_fuel", "te"), me7._fuel),
     GeneratorSpec("ignition", "Ignition Timing (KFZW)", ("full",), ("rpm_ign", "load_ign"), me7._ignition),
-    GeneratorSpec("manifold", "Intake Manifold Model (KFURL / KFPRG)", ("full",), ("rpm_url",), me7._manifold),
+    GeneratorSpec("manifold", "Intake Manifold Model (KFURL / KFPRG / KFPBRK)", ("full",), ("rpm_url",), me7._manifold),
 ]
 
 VEHICLE_LOGS = LogSource(

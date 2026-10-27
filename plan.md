@@ -55,6 +55,18 @@ family means one `TargetMap` line and one generator wrapper.
   gear change within 0.5 s, optional rpm floor (0 = off). The pedal is not
   a condition. A missing
   deviation channel is derived as target minus boost at ingest.
+- KFPBRK / KFPBRKNW (ME7 set, 2026-10-27): per row the factor that makes
+  the fitted line hit the logged pressure, f = (rl / KFURL + KFPRG) / ps,
+  averaged on the factory grid (rpm by load); VVT off rows feed KFPBRK, VVT
+  on rows KFPBRKNW. The value is the full map entry (the logged pressure
+  already contains the file's factor), cells without data keep the factory
+  value, rows with ps at the 2560 hPa ceiling are dropped. Parameters:
+  "Fit KFURL / KFPRG on loads up to" (0 = all loads, today's fit; 80 gives
+  the factory structure with the factor at 1 below) and "KFPBRK factor acts
+  on" (pressure, the reading of the function frame used here, or load).
+  A check table gives the model's pressure error per RPM bin before and
+  after. Open: confirm from the FR where the factor enters and that the
+  lookup load is rl_w.
 - Behaviour changes made on purpose versus MATLAB: the Percent trim mode
   works; the warmup hot threshold and the KFZW VVT split follow the fields
   instead of being fixed at 80 and 18.
@@ -63,7 +75,7 @@ family means one `TargetMap` line and one generator wrapper.
 
 | Family | Maps in | Logs | Generators | Verified |
 | --- | --- | --- | --- | --- |
-| Bosch ME7 | WinOLS CSV export | ME7-Logger, TunerPro | boost, handover, warmup, fuel, ignition, manifold model | identical to MATLAB on real logs |
+| Bosch ME7 | WinOLS CSV export | ME7-Logger (raw files with preamble, or stripped), TunerPro | boost, handover, warmup, fuel, ignition, manifold model incl. KFPBRK / KFPBRKNW | identical to MATLAB on real logs (KFPBRK is new, unit tests) |
 | Siemens MS43 (MS4X) | XDF + bin | TunerPro RT (ON/OFF flags) | closed-loop VE (trims or wideband, paste-ready corrected tables), knock removal on ip_iga_ron98_pl__n__maf | unit tests; VANOS limp-home warning on import |
 | Bosch ME1.5.5 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger, same shape and RAM names as ME7.6.2 | the ME7 six via `families/opel_vehicle.py`; knock from wkrm or worst cylinder (dwkrz_0_A..3_A); overrun rows dropped; zero-WGDC and modelled-ps_w warnings | unit tests; ingest run on the one Astra G log, no maps yet |
 | Bosch ME7.6.2 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger: RAM names, German descriptions, units row, time in ms | the ME7 six on Opel names (nmot, rl_w, wped, pvdkds_w, ps_w, ldtvm, tevfa_w, frm_w, fra_w, tmot, wkrm); overrun rows dropped; modelled-ps_w warning | unit tests; ingest run on the three Astra logs, no maps yet |

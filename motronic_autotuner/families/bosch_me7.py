@@ -11,7 +11,7 @@ from ..generators.boost import generate_boost_maps
 from ..generators.fuel import generate_fkkvs
 from ..generators.handover import generate_handover_maps
 from ..generators.ignition import generate_kfzw
-from ..generators.manifold import generate_manifold_maps
+from ..generators.manifold import generate_manifold_maps, generate_pbrk_maps
 from ..generators.warmup import generate_warmup_maps
 from .base import Family, GeneratorSpec, LogSource, ParamSpec, RunContext, RunResult, StatusRow
 
@@ -70,6 +70,11 @@ PARAMS = [
     ParamSpec("ambient_pressure", "Ambient pressure (hPa)", "float", 1000.0, group="General Math & Fuel Settings", minimum=0),
     ParamSpec("temp_max", "Warmup max temp (C)", "float", 80.0, group="General Math & Fuel Settings"),
     ParamSpec("wot_min", "WOT minimum pedal (%)", "float", 70.0, group="General Math & Fuel Settings", minimum=0, maximum=100),
+    ParamSpec("fit_load_max", "Fit KFURL / KFPRG on loads up to (%) (0 = all loads)", "float", 0.0,
+              group="Intake Manifold Model", minimum=0, maximum=400),
+    ParamSpec("pbrk_apply", "KFPBRK factor acts on", "choice", "pressure", group="Intake Manifold Model",
+              choices=(("Manifold pressure before residual gas: rl = (ps x f - KFPRG) x KFURL", "pressure"),
+                       ("Load: rl = (ps - KFPRG) x KFURL x f", "load"))),
 ]
 
 TARGET_MAPS = [
@@ -152,15 +157,34 @@ def _ignition(ctx: RunContext):
 
 
 def _manifold(ctx: RunContext):
+    """KFURL and KFPRG from the linear fit, then KFPBRK / KFPBRKNW from its residual
+    when the correction map axes were imported."""
     p = ctx.preset
-    return _on_sheet(generate_manifold_maps(
+    min_samples = float(ctx.p("min_samples", 1))
+    vvt_enabled = bool(ctx.p("vvt_enabled", False))
+    vvt_threshold = float(ctx.p("vvt_threshold", 18))
+    maps = generate_manifold_maps(
         ctx.logs.full, p.vars,
-        min_samples=float(ctx.p("min_samples", 1)),
-        vvt_enabled=bool(ctx.p("vvt_enabled", False)),
-        vvt_threshold=float(ctx.p("vvt_threshold", 18)),
-        axis_rpm=p.axis("rpm_url"),
+        min_samples=min_samples, vvt_enabled=vvt_enabled, vvt_threshold=vvt_threshold,
+        axis_rpm=p.axis("rpm_url"), fit_load_max=float(ctx.p("fit_load_max", 0)),
         messages=ctx.messages,
-    ), "Airflow")
+    )
+    axis_rpm_pbrk, axis_load_pbrk = p.axis("rpm_pbrk"), p.axis("load_pbrk")
+    if axis_rpm_pbrk is None or axis_load_pbrk is None:
+        ctx.messages.append("  KFPBRK: axes rpm_pbrk / load_pbrk not imported, correction maps skipped.")
+    else:
+        by = {m.key: m for m in maps}
+        maps += generate_pbrk_maps(
+            ctx.logs.full, p.vars,
+            kfurl=by["kfurl"].values, kfprg=by["kfprg"].values, axis_rpm_fit=p.axis("rpm_url"),
+            vvt_enabled=vvt_enabled, vvt_threshold=vvt_threshold,
+            axis_rpm=axis_rpm_pbrk, axis_load=axis_load_pbrk, base_map=p.base_map("base_kfpbrk"),
+            axis_rpm_nw=p.axis("rpm_pbrknw"), axis_load_nw=p.axis("load_pbrknw"),
+            base_map_nw=p.base_map("base_kfpbrknw"),
+            min_samples=min_samples, apply_to=str(ctx.p("pbrk_apply", "pressure")),
+            messages=ctx.messages,
+        )
+    return _on_sheet(maps, "Airflow")
 
 
 def _apply_5120_scaling(ctx: RunContext, result: RunResult) -> None:
@@ -184,7 +208,7 @@ GENERATORS = [
                   ("rpm_kffwlw", "load_kffwlw", "tmot"), _warmup),
     GeneratorSpec("fuel", "Fuel Trim (FKKVS)", ("hot",), ("rpm_fuel", "te"), _fuel),
     GeneratorSpec("ignition", "Ignition Timing (KFZW)", ("full",), ("rpm_ign", "load_ign"), _ignition),
-    GeneratorSpec("manifold", "Intake Manifold Model (KFURL / KFPRG)", ("full",), ("rpm_url",), _manifold),
+    GeneratorSpec("manifold", "Intake Manifold Model (KFURL / KFPRG / KFPBRK)", ("full",), ("rpm_url",), _manifold),
 ]
 
 BOSCH_ME7 = Family(
