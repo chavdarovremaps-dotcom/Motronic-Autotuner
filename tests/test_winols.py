@@ -72,3 +72,72 @@ def test_single_row_map_gets_zero_y(tmp_path):
     # as in MATLAB: x values go to the x key, the synthetic single y value to the y key
     assert r.axes["kffwl_trim"].tolist() == [-30.0, 0.0, 40.0, 80.0]
     assert r.axes["tmot"].tolist() == [0.0]
+
+
+HEADER64 = ";".join(
+    ["Name", "IdName", "FolderName", "Type", "ViewMode", "RWin", "DataOrg", "bReciprocal", "bSigned", "bDelta",
+     "bPercent", "bOriginal", "bOriginalValues", "Columns", "Rows"] + [f"f{i}" for i in range(15, 29)]
+    + ["AxisX.Name", "AxisX.IdName", "AxisX.Unit"] + [f"x{i}" for i in range(32, 45)]
+    + ["AxisY.Name", "AxisY.IdName", "AxisY.Unit"] + [f"y{i}" for i in range(48, 61)]
+    + ["Fieldvalues.Values", "AxisX.Values", "AxisY.Values"])
+
+
+def line64(name, cols, rows, z, x, y, x_name="", x_unit="", y_name="", y_unit=""):
+    """A map line in the 64-field export layout of current WinOLS versions."""
+    parts = ["desc", name, "folder", "eZweidim", "eViewText", "eBars", "eLoHi"] + ["0"] * 6 + [str(cols), str(rows)]
+    parts += ["0"] * 14 + [x_name, "", x_unit] + ["0"] * 13 + [y_name, "", y_unit] + ["0"] * 13
+    parts += [" ".join(f"{v:g}" for v in z), " ".join(f"{v:g}" for v in x), " ".join(f"{v:g}" for v in y)]
+    assert len(parts) == 64
+    return ";".join(parts)
+
+
+RPM10 = [700, 1000, 1520, 2000, 2520, 3000, 3520, 4000, 5000, 6000]
+VVT6 = [0, 1, 2, 3, 20, 22]
+URL = TargetMap("KFURL", "rpm_url", "vvt_url", "base_kfurl", "SR")
+
+
+def test_new_layout_with_rpm_columns_is_flipped_to_rpm_rows(tmp_path):
+    z = np.arange(60, dtype=float)                       # 6 rows (vvt) x 10 cols (rpm), as the 362287 export has it
+    path = write(tmp_path, HEADER64, line64("KFURL", 10, 6, z, RPM10, VVT6, x_unit="U/min", y_unit="\xb0KW"))
+    r = parse_export(path, [URL])
+    assert r.rows[0].status == winols.STATUS_FLIPPED and r.rows[0].dims == "10 x 6"
+    assert r.base_maps["base_kfurl"].shape == (10, 6)
+    np.testing.assert_array_equal(r.base_maps["base_kfurl"][:, 2], z.reshape(6, 10)[2])
+    assert r.axes["rpm_url"].tolist() == RPM10 and r.axes["vvt_url"].tolist() == VVT6
+
+
+def test_square_map_with_rpm_columns_is_flipped_from_the_values_alone(tmp_path):
+    z = np.arange(16, dtype=float)
+    path = write(tmp_path, HEADER64, line64("KFPBRK", 4, 4, z, [1000, 2000, 3000, 4000], [50, 60, 70, 80]))
+    r = parse_export(path, [TargetMap("KFPBRK", "rpm_pbrk", "load_pbrk", "base_kfpbrk", "SR")])
+    assert r.rows[0].status == winols.STATUS_FLIPPED
+    assert r.axes["rpm_pbrk"].tolist() == [1000, 2000, 3000, 4000] and r.axes["load_pbrk"].tolist() == [50, 60, 70, 80]
+    np.testing.assert_array_equal(r.base_maps["base_kfpbrk"], z.reshape(4, 4).T)
+
+
+def test_value_lists_swapped_against_the_axis_names_still_land_rpm_on_rows(tmp_path):
+    # the 032HJ export: AxisX says Motordrehzahl but AxisX.Values holds the VVT list
+    z = np.arange(60, dtype=float)
+    path = write(tmp_path, HEADER64, line64("KFURL", 10, 6, z, VVT6, RPM10, x_name="Motordrehzahl", x_unit="U/min"))
+    r = parse_export(path, [URL])
+    assert r.rows[0].status == winols.STATUS_TRANSPOSED and r.rows[0].dims == "10 x 6"
+    assert r.base_maps["base_kfurl"].shape == (10, 6)
+    assert r.axes["rpm_url"].tolist() == RPM10 and r.axes["vvt_url"].tolist() == VVT6
+
+
+def test_pressure_columns_with_rpm_rows_are_left_alone(tmp_path):
+    z = np.arange(24, dtype=float)
+    path = write(tmp_path, HEADER64, line64("KFLDIMX", 4, 6, z, [250, 500, 1000, 1400], VVT6[:0] + [1000, 1500, 2000, 2500, 3000, 3500],
+                                            x_unit="hPa", y_unit="U/min"))
+    r = parse_export(path, [TargetMap("KFLDIMX", "rpm_boost", "boost", "base_kfldimx", "B")])
+    assert r.rows[0].status == winols.STATUS_LOADED and r.base_maps["base_kfldimx"].shape == (6, 4)
+
+
+def test_direct_map_with_rpm_columns_is_flipped_too(tmp_path):
+    # the 018J and 362287 exports have KFVPDKSD with rpm along the columns
+    z = np.arange(6, dtype=float)
+    path = write(tmp_path, HEADER64, line64("KFVPDKSD", 3, 2, z, [1000, 2000, 3000], [1.5, 2.0], x_unit="U/min"))
+    r = parse_export(path, [TargetMap("KFVPDKSD", "rpm_kfvp", "pratio_kfvp", "base_kfvp", "H", direct=True)])
+    assert r.rows[0].status == winols.STATUS_FLIPPED
+    assert r.axes["rpm_kfvp"].tolist() == [1000, 2000, 3000] and r.axes["pratio_kfvp"].tolist() == [1.5, 2.0]
+    assert r.base_maps["base_kfvp"].shape == (3, 2)

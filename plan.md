@@ -41,6 +41,11 @@ family means one `TargetMap` line and one generator wrapper.
   the cell, rounds up to whole map steps, and ignores averages under a
   floor (0.1 degree default) because bilinear weighting leaks slivers into
   neighbouring cells.
+- WinOLS import keeps rpm on the rows of every map whose y axis key says
+  rpm. The rpm axis is recognised from its values (increasing, 300 to at
+  least 2000) and only in doubt from the export's AxisX / AxisY name and
+  unit fields; WinOLS has exported KFURL both ways (032HJ: value lists
+  swapped against the names; 362287: rpm on the columns, names empty).
 - Maps are stored as the XDF reads them: rows are the y axis. MS43 VE and
   ignition maps have RPM on one axis and MAP or load on the other as the
   XDF says; MG1 timing and fuel scalar maps are load rows by RPM columns.
