@@ -9,6 +9,7 @@ from ..core.logs import hack_5120
 from ..core.winols import TargetMap
 from ..generators import axis_block, column
 from ..generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
+from ..generators.boost_pid import generate_pid_scaling
 from ..generators.fuel import generate_fkkvs
 from ..generators.handover import generate_handover_maps
 from ..generators.ignition import generate_kfzw
@@ -68,6 +69,12 @@ PARAMS = [
               group="Boost & Wastegate Settings", minimum=50, maximum=100),
     ParamSpec("auto_axis_kfvp", "Auto axis KFVPDKSD (0.95, 1.0, even to 1.2 x base-WG peak ratio; rows under 1.2 stock)",
               "bool", False, group="Boost & Wastegate Settings"),
+    ParamSpec("ldr_scale_mode", "Scale KFLDRQ0 / Q1 / Q2 / KFLDRAPP by the duty ratio logs / file", "choice", "overall",
+              group="Boost PID Scaling",
+              choices=(("One overall ratio", "overall"), ("Per rpm", "per_rpm"))),
+    ParamSpec("ldr_min_file_duty", "Use KFLDRL cells where the file's duty is at least (%)", "float", 20.0,
+              group="Boost PID Scaling", minimum=0, maximum=100),
+    ParamSpec("ldr_scale_kfldrapp", "Scale KFLDRAPP too", "bool", True, group="Boost PID Scaling"),
     ParamSpec("min_samples", "Min samples per cell", "int", 1, group="General Math & Fuel Settings", minimum=0),
     ParamSpec("trim_format", "Fuel trim format", "choice", "lambda", group="General Math & Fuel Settings",
               choices=(("Lambda (factor, e.g. 1.05)", "lambda"), ("Percent (e.g. 5)", "percent"))),
@@ -88,6 +95,10 @@ TARGET_MAPS = [
     TargetMap("KFLDIMX", "rpm_boost", "boost", "base_kfldimx", "Boost Control"),
     TargetMap("KFLDRL", "rpm_boost", "kfldrl_x", "base_kfldrl", "Boost Control"),
     TargetMap("KFVPDKSD", "rpm_kfvp", "pratio_kfvp", "base_kfvp", "Throttle Handover", direct=True),
+    TargetMap("KFLDRQ0", "rpm_kfldrq0", "x_kfldrq0", "base_kfldrq0", "Boost PID"),
+    TargetMap("KFLDRQ1", "rpm_kfldrq1", "x_kfldrq1", "base_kfldrq1", "Boost PID"),
+    TargetMap("KFLDRQ2", "rpm_kfldrq2", "x_kfldrq2", "base_kfldrq2", "Boost PID"),
+    TargetMap("KFLDRAPP", "rpm_kfldrapp", "x_kfldrapp", "base_kfldrapp", "Boost PID"),
     TargetMap("FKKVS", "rpm_fuel", "te", "base_fkkvs", "Fueling"),
     TargetMap("KFFWLW", "rpm_kffwlw", "load_kffwlw", "base_kffwlw", "Warmup Enrichment"),
     TargetMap("KFFWL", "tmot", "kffwl_trim", "base_kffwl", "Warmup Enrichment"),
@@ -139,6 +150,34 @@ def _boost(ctx: RunContext):
         safety_margin=float(ctx.p("safety_margin", 0)),
     )
     return _on_sheet(blocks + maps, "Boost")
+
+
+PID_MAPS = (("kfldrq0", "KFLDRQ0", "Deviation hPa"), ("kfldrq1", "KFLDRQ1", "Deviation hPa"),
+            ("kfldrq2", "KFLDRQ2", "Deviation hPa"), ("kfldrapp", "KFLDRAPP", "Pedal %"))
+
+
+def _pid_scale(ctx: RunContext):
+    """Scale the boost PID maps by the ratio of the duty the logs need over the
+    duty the file holds, read from the KFLDRL just calculated."""
+    p = ctx.preset
+    kfldrl = ctx.map("kfldrl")
+    if kfldrl is None:
+        ctx.messages.append("Boost PID scaling: KFLDRL was not calculated, nothing to scale against.")
+        return []
+    maps = []
+    for key, name, x_label in PID_MAPS:
+        if key == "kfldrapp" and not bool(ctx.p("ldr_scale_kfldrapp", True)):
+            continue
+        base, axis_rpm, axis_x = p.base_map(f"base_{key}"), p.axis(f"rpm_{key}"), p.axis(f"x_{key}")
+        if base is None or axis_rpm is None or axis_x is None:
+            ctx.messages.append(f"Boost PID scaling: {name} not imported, skipped.")
+            continue
+        maps.append((key, name, base, axis_rpm, axis_x, x_label))
+    return _on_sheet(generate_pid_scaling(
+        kfldrl, factory_kfldrl=p.base_map("base_kfldrl"), factory_axis_rpm=p.axis("rpm_boost"),
+        factory_axis_x=p.axis("kfldrl_x"), pid_maps=maps, mode=str(ctx.p("ldr_scale_mode", "overall")),
+        min_file_duty=float(ctx.p("ldr_min_file_duty", 20)), messages=ctx.messages,
+    ), "Boost")
 
 
 def _handover(ctx: RunContext):
@@ -233,6 +272,8 @@ def _apply_5120_scaling(ctx: RunContext, result: RunResult) -> None:
 
 GENERATORS = [
     GeneratorSpec("boost", "Boost Control (KFLDIMX / KFLDRL)", ("wot",), ("rpm_boost", "boost", "kfldrl_x"), _boost),
+    GeneratorSpec("pid", "Boost PID Scaling (KFLDRQ0 / Q1 / Q2 / KFLDRAPP)", ("wot",), ("rpm_boost", "kfldrl_x"),
+                  _pid_scale, required_base_maps=("base_kfldrl",)),
     GeneratorSpec("handover", "Throttle Handover (KFVPDKSD)", ("wot",), ("rpm_kfvp", "pratio_kfvp"), _handover),
     GeneratorSpec("warmup", "Warmup Enrichment (KFFWL / KFFWLW)", ("warmup", "full"),
                   ("rpm_kffwlw", "load_kffwlw", "tmot"), _warmup),

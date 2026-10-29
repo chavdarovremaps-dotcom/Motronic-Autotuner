@@ -87,6 +87,11 @@ class RunContext:
     preset: Preset
     logs: SplitLogs
     messages: list[str] = field(default_factory=list)
+    maps: list[CalibrationMap] = field(default_factory=list)
+    """Maps the generators before this one produced, e.g. KFLDRL for the PID scaling."""
+
+    def map(self, key: str) -> CalibrationMap | None:
+        return next((m for m in self.maps if m.key == key), None)
 
     def p(self, key: str, default: Any = None) -> Any:
         return self.preset.params.get(key, default)
@@ -264,6 +269,7 @@ class Family:
                 result.rows.append(StatusRow(gen.label, f"Error: {exc}", "-"))
                 ctx.messages.append(f"{gen.label} Error: {exc}")
                 continue
+            ctx.maps.extend(maps)
             for m in maps:
                 result.maps.append(m)
                 status = "No data" if (m.skip_if_empty and m.all_nan) else "Calculated"

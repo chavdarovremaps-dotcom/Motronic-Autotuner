@@ -7,6 +7,7 @@ import pytest
 from motronic_autotuner.core.logs import SplitLogs
 from motronic_autotuner.families.bosch_me7 import BOSCH_ME7, DEFAULT_VARS
 from motronic_autotuner.generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
+from motronic_autotuner.generators.boost_pid import duty_ratio, scale_rows
 from motronic_autotuner.generators.handover import generate_kfvpdksd, generate_handover_maps, pratio_axis_from_curve
 from motronic_autotuner.generators.ignition import generate_kfzw
 from motronic_autotuner.generators.manifold import generate_manifold_maps, generate_pbrk_maps
@@ -130,8 +131,8 @@ def test_family_run_all_with_missing_axes_reports_skips():
     keys = [m.key for m in result.maps]
     assert keys == ["kfldimx", "kfldrl", "abs_wgdc"]
     skipped = [r for r in result.rows if r.status.startswith("Skipped")]
-    assert len(skipped) == 5
-    assert all("Missing axes" in r.status for r in skipped)
+    assert len(skipped) == 6
+    assert all("Missing axes" in r.status or "Missing base maps" in r.status for r in skipped)
     # with axes present but no warmup rows, the subset check reports instead
     preset.axes.update({"rpm_kffwlw": AXIS_RPM, "load_kffwlw": np.array([10.0, 100.0]), "tmot": np.array([0.0, 80.0])})
     result = BOSCH_ME7.run_all(preset, logs)
@@ -329,3 +330,52 @@ def test_me7_auto_axes_land_in_the_result():
     assert 3150 <= axis[4] <= 3300 and axis.tolist() == spool_rpm_axis(axis[4]).tolist() and axis[-1] % 500 == 0
     assert result.map("kfldrl").y_axis.tolist() == axis.tolist() == result.map("kfldimx").y_axis.tolist()
     assert any("Auto axis KFLDRL / KFLDIMX: spool at" in m for m in result.messages)
+
+
+def test_duty_ratio_reads_the_sensitivity_from_kfldrl():
+    axis_x = np.array([0, 25, 50, 75, 95.0])
+    factory = np.array([[0, 20, 40, 60, 80.0], [0, 30, 50, 70, 90.0], [0, 10, 15, 20, 25.0]])   # rows: 3 rpm points
+    new = factory * 0.25
+    new[0, 1] = np.nan                                                 # one cell without data
+    ratio = duty_ratio(new, AXIS_RPM[:3], axis_x, factory, AXIS_RPM[:3], axis_x, min_file_duty=20)
+    np.testing.assert_allclose(ratio["per_rpm"][:2], 0.25)
+    assert ratio["cells"].tolist() == [3, 4, 1]                        # file duty >= 20 and data present
+    np.testing.assert_allclose(ratio["overall"], 0.25)
+    # a different ratio per rpm lands per row, or as one number
+    new[2] = factory[2] * 0.5
+    ratio = duty_ratio(new, AXIS_RPM[:3], axis_x, factory, AXIS_RPM[:3], axis_x, min_file_duty=20)
+    np.testing.assert_allclose(ratio["per_rpm"], [0.25, 0.25, 0.5])
+    base = np.ones((3, 4)) * 10
+    scaled, factor = scale_rows(base, AXIS_RPM[:3], ratio, "per_rpm")
+    np.testing.assert_allclose(scaled[:, 0], [2.5, 2.5, 5.0])
+    scaled, factor = scale_rows(base, AXIS_RPM[:3], ratio, "overall")
+    assert np.allclose(scaled, 10 * ratio["overall"]) and 0.25 < ratio["overall"] < 0.5
+    # a map on another rpm axis gets the per-rpm factor interpolated and clamped
+    scaled, factor = scale_rows(np.ones((2, 2)), np.array([500.0, 9000.0]), ratio, "per_rpm")
+    np.testing.assert_allclose(factor, [0.25, 0.5])
+
+
+def test_me7_pid_scaling_follows_kfldrl():
+    preset = BOSCH_ME7.default_preset()
+    axis_boost = np.array([250, 500, 750, 1000, 1250.0])
+    kfldrl_x = np.arange(0, 100, 10.0)
+    preset.axes = {"rpm_boost": AXIS_RPM, "boost": axis_boost, "kfldrl_x": kfldrl_x,
+                   "rpm_kfldrq0": np.array([1000, 3000, 6000.0]), "x_kfldrq0": np.array([100, 400.0]),
+                   "rpm_kfldrapp": np.array([1000, 6000.0]), "x_kfldrapp": np.array([0, 100.0])}
+    preset.base_maps = {"base_kfldrq0": np.full((3, 2), 40.0), "base_kfldrapp": np.full((2, 2), 10.0)}
+    data = synthetic_log(n=20000)
+    logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
+    # without the file's KFLDRL the PID generator is skipped
+    result = BOSCH_ME7.run_all(preset, logs)
+    assert any("Boost PID" in r.name and "Missing base maps" in r.status for r in result.rows)
+    # with a file whose KFLDRL asks four times the duty the logs show, the gains come down to a quarter
+    kfldrl = result.map("kfldrl").values
+    preset.base_maps["base_kfldrl"] = np.nan_to_num(kfldrl * 4.0, nan=50.0)
+    result = BOSCH_ME7.run_all(preset, logs)
+    scale = result.map("ldr_scale")
+    assert scale is not None and 0.24 < float(scale.title.split("overall ")[1].rstrip(")")) < 0.26
+    q0 = result.map("kfldrq0_corrected")
+    np.testing.assert_allclose(q0.values, 10.0, rtol=0.05)
+    assert q0.y_axis.tolist() == [1000, 3000, 6000] and result.map("kfldrapp_corrected") is not None
+    assert any("Boost PID scaling: the logs need 0.25" in m for m in result.messages)
+    assert any("KFLDRQ1 not imported" in m for m in result.messages)
