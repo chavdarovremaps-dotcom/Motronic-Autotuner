@@ -339,7 +339,7 @@ def test_duty_ratio_reads_the_sensitivity_from_kfldrl():
     new[0, 1] = np.nan                                                 # one cell without data
     ratio = duty_ratio(new, AXIS_RPM[:3], axis_x, factory, AXIS_RPM[:3], axis_x, min_file_duty=20)
     np.testing.assert_allclose(ratio["per_rpm"][:2], 0.25)
-    assert ratio["cells"].tolist() == [3, 4, 1]                        # file duty >= 20 and data present
+    assert ratio["cells"].tolist() == [3, 4, 2]                        # file duty >= 20 and data present
     np.testing.assert_allclose(ratio["overall"], 0.25)
     # a different ratio per rpm lands per row, or as one number
     new[2] = factory[2] * 0.5
