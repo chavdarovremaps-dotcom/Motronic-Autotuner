@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..core.maps import CalibrationMap
+
 
 def column(data: pd.DataFrame, name: str) -> np.ndarray:
     """A log column as a float array, with a clear error when it is missing."""
@@ -46,3 +48,9 @@ def near_gear_change(gear, time, blank_s: float) -> np.ndarray:
     for i in np.flatnonzero(np.diff(gear) != 0) + 1:
         out |= np.abs(time - time[i]) <= blank_s
     return out
+
+
+def axis_block(key: str, title: str, axis, label: str) -> CalibrationMap:
+    """A computed axis as a one-row block, points numbered from 1, for pasting into WinOLS."""
+    axis = np.asarray(axis, dtype=float).ravel()
+    return CalibrationMap(key, title, axis, np.arange(1, axis.size + 1), [label], corner_label="Point")

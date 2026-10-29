@@ -7,7 +7,8 @@ import numpy as np
 
 from ..core.logs import hack_5120
 from ..core.winols import TargetMap
-from ..generators.boost import generate_boost_maps
+from ..generators import axis_block, column
+from ..generators.boost import SPOOL_DUTY_WINDOW, detect_spool_rpm, generate_boost_maps, spool_rpm_axis
 from ..generators.fuel import generate_fkkvs
 from ..generators.handover import generate_handover_maps
 from ..generators.ignition import generate_kfzw
@@ -61,6 +62,12 @@ PARAMS = [
     ParamSpec("cwldimx", "CWLDIMX (relative to logged ambient)", "bool", False, group="Boost & Wastegate Settings"),
     ParamSpec("min_samples_base_wg", "Min samples (base WG)", "int", 1, group="Boost & Wastegate Settings", minimum=0),
     ParamSpec("safety_margin", "WGDC safety margin", "float", 1.0, group="Boost & Wastegate Settings"),
+    ParamSpec("auto_axis_kfldrl", "Auto axis KFLDRL / KFLDIMX RPM (5th point at the spool rpm)", "bool", False,
+              group="Boost & Wastegate Settings"),
+    ParamSpec("spool_boost_share", "Spool point: share of the peak boost (%)", "float", 90.0,
+              group="Boost & Wastegate Settings", minimum=50, maximum=100),
+    ParamSpec("auto_axis_kfvp", "Auto axis KFVPDKSD (0.95, 1.0, even to 1.2 x base-WG peak ratio; rows under 1.2 stock)",
+              "bool", False, group="Boost & Wastegate Settings"),
     ParamSpec("min_samples", "Min samples per cell", "int", 1, group="General Math & Fuel Settings", minimum=0),
     ParamSpec("trim_format", "Fuel trim format", "choice", "lambda", group="General Math & Fuel Settings",
               choices=(("Lambda (factor, e.g. 1.05)", "lambda"), ("Percent (e.g. 5)", "percent"))),
@@ -102,16 +109,37 @@ def _on_sheet(maps, sheet: str):
 
 
 def _boost(ctx: RunContext):
+    """KFLDIMX / KFLDRL; with the auto-axis tick the rpm axis is rebuilt around
+    the spool point found in the WOT rows and written out as a block."""
     p = ctx.preset
-    return _on_sheet(generate_boost_maps(
-        ctx.logs.wot, p.vars,
-        cwldimx=bool(ctx.p("cwldimx", False)),
-        ambient_pressure=float(ctx.p("ambient_pressure", 1000)),
+    d = ctx.logs.wot
+    cwldimx = bool(ctx.p("cwldimx", False))
+    ambient = float(ctx.p("ambient_pressure", 1000))
+    axis_rpm = p.axis("rpm_boost")
+    blocks = []
+    if bool(ctx.p("auto_axis_kfldrl", False)):
+        rel = column(d, p.var("boost")) - (column(d, p.var("pu")) if cwldimx else ambient)
+        spool, info = detect_spool_rpm(column(d, p.var("rpm")), rel, column(d, p.var("wgdc")),
+                                       share=float(ctx.p("spool_boost_share", 90)))
+        if spool is None:
+            ctx.messages.append(f"Auto axis KFLDRL: no spool point found ({info.get('rows', 0)} rows with duty >= "
+                                f"{info.get('min_duty', 0):.0f} %), factory axis kept.")
+        else:
+            axis_rpm = spool_rpm_axis(spool)
+            ctx.messages.append(
+                f"Auto axis KFLDRL / KFLDIMX: spool at {spool:.0f} rpm ({info['share']:g} % of {info['peak']:.0f} hPa "
+                f"relative boost, {info['rows']} rows with duty within {SPOOL_DUTY_WINDOW:g} % of {info['top_duty']:.0f} %); "
+                f"axis {', '.join(f'{a:g}' for a in axis_rpm)}.")
+            blocks.append(axis_block("rpm_axis_boost", "KFLDRL / KFLDIMX RPM axis (paste into WinOLS)", axis_rpm, "RPM"))
+    maps = generate_boost_maps(
+        d, p.vars,
+        cwldimx=cwldimx, ambient_pressure=ambient,
         min_samples=float(ctx.p("min_samples_base_wg", 1)),
         fill_missing=bool(ctx.p("fill_missing_data", False)),
-        axis_rpm=p.axis("rpm_boost"), axis_boost=p.axis("boost"), axis_kfldrl_x=p.axis("kfldrl_x"),
+        axis_rpm=axis_rpm, axis_boost=p.axis("boost"), axis_kfldrl_x=p.axis("kfldrl_x"),
         safety_margin=float(ctx.p("safety_margin", 0)),
-    ), "Boost")
+    )
+    return _on_sheet(blocks + maps, "Boost")
 
 
 def _handover(ctx: RunContext):
@@ -121,6 +149,9 @@ def _handover(ctx: RunContext):
         min_samples_base_wg=float(ctx.p("min_samples_base_wg", 1)),
         ambient_pressure=float(ctx.p("ambient_pressure", 1000)),
         axis_rpm=p.axis("rpm_kfvp"), axis_pratio=p.axis("pratio_kfvp"),
+        auto_axis=bool(ctx.p("auto_axis_kfvp", False)),
+        base_map=p.base_map("base_kfvp"), base_axis_rpm=p.axis("rpm_kfvp"), base_axis_pratio=p.axis("pratio_kfvp"),
+        messages=ctx.messages,
     ), "Boost")
 
 

@@ -60,6 +60,15 @@ family means one `TargetMap` line and one generator wrapper.
   gear change within 0.5 s, optional rpm floor (0 = off). The pedal is not
   a condition. A missing
   deviation channel is derived as target minus boost at ingest.
+- Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
+  Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
+  the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)
+  of the peak, on WOT rows with duty within 5 % of the highest duty; the
+  axis is spool - 1000 .. spool - 250, spool, + 250 .. + 1250, then 500
+  steps snapped to multiples of 500 (3300 gives 2300 .. 4550, 5000 .. 7500).
+  KFVPDKSD ratio axis: 0.95, 1.0, then even steps to 1.2 x the base-WG peak
+  ratio; rows under 1.2 keep the imported map's values at the same rpm.
+  Both axes are written as one-row blocks on the Boost sheet.
 - KFPBRK / KFPBRKNW (ME7 set, 2026-10-27): per row the factor that makes
   the fitted line hit the logged pressure, f = (rl / KFURL + KFPRG) / ps,
   averaged on the factory grid (rpm by load); VVT off rows feed KFPBRK, VVT

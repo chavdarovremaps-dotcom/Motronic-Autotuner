@@ -6,8 +6,8 @@ import pytest
 
 from motronic_autotuner.core.logs import SplitLogs
 from motronic_autotuner.families.bosch_me7 import BOSCH_ME7, DEFAULT_VARS
-from motronic_autotuner.generators.boost import generate_boost_maps
-from motronic_autotuner.generators.handover import generate_kfvpdksd, generate_handover_maps
+from motronic_autotuner.generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
+from motronic_autotuner.generators.handover import generate_kfvpdksd, generate_handover_maps, pratio_axis_from_curve
 from motronic_autotuner.generators.ignition import generate_kfzw
 from motronic_autotuner.generators.manifold import generate_manifold_maps, generate_pbrk_maps
 from motronic_autotuner.generators.warmup import generate_warmup_maps
@@ -250,3 +250,82 @@ def test_me7_run_all_adds_pbrk_when_its_axes_are_present():
     keys = [m.key for m in result.maps]
     assert keys == ["kfurl", "kfprg", "kfpbrk", "kfpbrk_corrected", "pbrk_check"]
     assert all(m.sheet == "Airflow" for m in result.maps)
+
+
+def spool_log(n=20000, seed=7, spool=3300.0):
+    """WOT rows of a turbo that holds the gate shut (95 %) until ``spool`` and
+    reaches full boost there: 1200 hPa over ambient from 2500 rpm in 800 rpm."""
+    rng = np.random.default_rng(seed)
+    d = synthetic_log(n, seed)
+    rpm = rng.uniform(1500, 6500, n)
+    rel = np.clip((rpm - 2500) * 1200 / (spool - 2500), 0, 1200) + rng.normal(0, 15, n)
+    d[V["rpm"]] = rpm
+    d[V["boost"]] = 1000 + rel
+    d[V["wgdc"]] = np.where(rpm < spool, 95.0, np.where(rpm > 5500, 5.0, 70.0))   # gate open past 5500: base-WG rows
+    d[V["pedal"]] = 100.0
+    return d
+
+
+def test_spool_rpm_axis_layout():
+    assert spool_rpm_axis(3300).tolist() == [2300, 2550, 2800, 3050, 3300, 3550, 3800, 4050, 4300, 4550,
+                                             5000, 5500, 6000, 6500, 7000, 7500]
+    assert spool_rpm_axis(3250).tolist()[10:] == [5000, 5500, 6000, 6500, 7000, 7500]
+    assert spool_rpm_axis(3000).tolist()[-1] == 7000 and spool_rpm_axis(3000).size == 16
+
+
+def test_detect_spool_rpm_from_the_gate_shut_rows():
+    d = spool_log()
+    spool, info = detect_spool_rpm(d[V["rpm"]], d[V["boost"]] - 1000, d[V["wgdc"]])
+    assert 3150 <= spool <= 3300 and info["top_duty"] == 95.0 and info["peak"] > 1100
+    # 90 % of 1200 over ambient is reached 80 rpm before full boost: 3300 - 0.1 * 800 = 3220
+    assert spool_rpm_axis(spool)[4] == spool
+    none, info = detect_spool_rpm(d[V["rpm"]][:2], d[V["boost"]][:2], d[V["wgdc"]][:2])
+    assert none is None
+
+
+def test_pratio_axis_from_curve():
+    axis = pratio_axis_from_curve(np.array([1200, 1500, np.nan, 1600.0]), 1000.0, 12)
+    assert axis.size == 12 and axis[0] == 0.95 and axis[1] == 1.0 and axis[-1] == 1.92
+    np.testing.assert_allclose(np.diff(axis[1:]), 0.092, atol=1e-4)
+    assert pratio_axis_from_curve(np.array([np.nan]), 1000.0, 12) is None
+    assert pratio_axis_from_curve(np.array([800.0]), 1000.0, 12) is None
+
+
+def test_handover_auto_axis_keeps_the_stock_rows_under_1_2():
+    data = synthetic_log()
+    data.loc[data[V["wgdc"]] < 10, V["boost"]] = 1500.0                  # base-WG rows hold 1.5 bar absolute
+    factory_axis = np.linspace(0.95, 1.5, 12)
+    base = np.tile(np.linspace(0.90, 1.0, 12), (AXIS_RPM.size, 1))      # rows rpm, cols ratio: a ramp to recognise
+    msgs = []
+    maps = generate_handover_maps(data, V, min_samples_base_wg=1, ambient_pressure=1000, axis_rpm=AXIS_RPM,
+                                  axis_pratio=factory_axis, auto_axis=True, base_map=base, base_axis_rpm=AXIS_RPM,
+                                  base_axis_pratio=factory_axis, messages=msgs)
+    by = {m.key: m for m in maps}
+    axis = by["pratio_axis_kfvp"].values
+    assert axis.size == 12 and axis[0] == 0.95 and axis[1] == 1.0 and 1.3 < axis[-1] < 1.5
+    kfvp = by["kfvp"]
+    assert kfvp.y_axis.tolist() == axis.tolist()
+    under = axis < 1.2
+    np.testing.assert_allclose(kfvp.values[under, 3], np.interp(axis[under], factory_axis, base[3]))
+    assert np.all((kfvp.values[~under] >= 0.95) & (kfvp.values[~under] <= 1.0))
+    assert any("kept at the imported values" in m for m in msgs)
+    # without the tick nothing changes
+    plain = {m.key: m for m in generate_handover_maps(data, V, min_samples_base_wg=1, ambient_pressure=1000,
+                                                        axis_rpm=AXIS_RPM, axis_pratio=factory_axis)}
+    assert "pratio_axis_kfvp" not in plain and plain["kfvp"].y_axis.tolist() == factory_axis.tolist()
+
+
+def test_me7_auto_axes_land_in_the_result():
+    preset = BOSCH_ME7.default_preset()
+    preset.axes = {"rpm_boost": AXIS_RPM, "boost": np.array([250, 500, 750, 1000, 1250.0]),
+                   "kfldrl_x": np.arange(0, 100, 10.0), "rpm_kfvp": AXIS_RPM, "pratio_kfvp": np.linspace(0.95, 1.5, 12)}
+    preset.params.update({"auto_axis_kfldrl": True, "auto_axis_kfvp": True})
+    data = spool_log()
+    logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
+    result = BOSCH_ME7.run_all(preset, logs)
+    keys = [m.key for m in result.maps]
+    assert keys[:4] == ["rpm_axis_boost", "kfldimx", "kfldrl", "abs_wgdc"] and "pratio_axis_kfvp" in keys
+    axis = result.map("rpm_axis_boost").values
+    assert 3150 <= axis[4] <= 3300 and axis[-1] == 7500
+    assert result.map("kfldrl").y_axis.tolist() == axis.tolist() == result.map("kfldimx").y_axis.tolist()
+    assert any("Auto axis KFLDRL / KFLDIMX: spool at" in m for m in result.messages)
