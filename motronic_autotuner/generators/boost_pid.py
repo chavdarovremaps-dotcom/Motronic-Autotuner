@@ -215,9 +215,10 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                 axis_rpm, ["Steepest rise (hPa per 10 % duty)", "From duty (%)", "To duty (%)",
                            "P from the logs (%/100 hPa)", "P used (%/100 hPa)", "File P on this axis"],
                 corner_label="Sensitivity \\ RPM"))
+            used = np.isfinite(table).any(axis=1)                           # duties with at least one usable cell
             maps.append(CalibrationMap(
-                "ldr_boost_per_duty", "Mean boost per forced duty (hPa abs)", table, axis_rpm,
-                [f"{lv:g} %" for lv in levels], counts=weights, counts_title="Boost per duty - SAMPLE WEIGHTS",
+                "ldr_boost_per_duty", "Mean boost per forced duty (hPa abs)", table[used], axis_rpm,
+                [f"{lv:g} %" for lv in levels[used]], counts=weights[used], counts_title="Boost per duty - SAMPLE WEIGHTS",
                 corner_label="Duty \\ RPM"))
     else:
         if kfldrl is None or factory_kfldrl is None:
