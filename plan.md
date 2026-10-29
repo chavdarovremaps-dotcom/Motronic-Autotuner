@@ -189,6 +189,18 @@ reference bin those tables are unprogrammed filler.
 
 ## Open items
 
+- [ ] ME7 boost PID, continue with the next ME7 car's forced-duty logs
+      (user brings them 2026-10-30): P from the boost-per-duty sensitivity
+      is built; the 032BJ logs were judged a poor example. Candidate addition:
+      a check row with the KFLDRL stair slope (last 0 % duty cell to the last
+      filled cell of each row), since cell-to-cell KFLDRL slopes from forced
+      duties are a staircase (risers ~12, treads ~1 %/100 hPa). I and D stay
+      manual.
+- [ ] Siemens MS43 turbo (BMW M54B30 with a turbo, MS4X firmware): new
+      calibration scripts, to be started in a new session. Build on the
+      existing Siemens MS43 family (XDF + bin import, TunerPro logs, VE,
+      knock, VANOS check), as a turbo variant or a new family.
+
 - [ ] Boost stage 2 and 3 as above (stage 3 only if targets rise).
 - [ ] Which timing map is active: the logged "Timing Cyl. 1" minus its
       correction does not line up with any of the four maps within a degree
