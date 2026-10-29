@@ -82,9 +82,9 @@ HEADER64 = ";".join(
     + ["Fieldvalues.Values", "AxisX.Values", "AxisY.Values"])
 
 
-def line64(name, cols, rows, z, x, y, x_name="", x_unit="", y_name="", y_unit=""):
+def line64(name, cols, rows, z, x, y, x_name="", x_unit="", y_name="", y_unit="", map_type="eZweidim"):
     """A map line in the 64-field export layout of current WinOLS versions."""
-    parts = ["desc", name, "folder", "eZweidim", "eViewText", "eBars", "eLoHi"] + ["0"] * 6 + [str(cols), str(rows)]
+    parts = ["desc", name, "folder", map_type, "eViewText", "eBars", "eLoHi"] + ["0"] * 6 + [str(cols), str(rows)]
     parts += ["0"] * 14 + [x_name, "", x_unit] + ["0"] * 13 + [y_name, "", y_unit] + ["0"] * 13
     parts += [" ".join(f"{v:g}" for v in z), " ".join(f"{v:g}" for v in x), " ".join(f"{v:g}" for v in y)]
     assert len(parts) == 64
@@ -141,3 +141,52 @@ def test_direct_map_with_rpm_columns_is_flipped_too(tmp_path):
     assert r.rows[0].status == winols.STATUS_FLIPPED
     assert r.axes["rpm_kfvp"].tolist() == [1000, 2000, 3000] and r.axes["pratio_kfvp"].tolist() == [1.5, 2.0]
     assert r.base_maps["base_kfvp"].shape == (3, 2)
+
+
+RATIO3 = [0.9, 1.0, 1.1]
+RPM3 = [1000, 2000, 3000]
+KFVP = TargetMap("KFVPDKSD", "rpm_kfvp", "pratio_kfvp", "base_kfvp", "H", direct=True)
+
+
+def test_inverted_map_new_style_values_run_along_x_first(tmp_path):
+    # 360288 / 362287 style: units match the lists, values stored [rpm][ratio]
+    z = np.arange(9, dtype=float)
+    path = write(tmp_path, HEADER64, line64("KFVPDKSD", 3, 3, z, RPM3, RATIO3, x_unit="U/min", y_unit="-",
+                                            map_type="eZweiInv"))
+    r = parse_export(path, [KFVP])
+    assert r.rows[0].status == winols.STATUS_FLIPPED
+    np.testing.assert_array_equal(r.base_maps["base_kfvp"], z.reshape(3, 3))        # rows rpm, cols ratio
+    assert r.axes["rpm_kfvp"].tolist() == RPM3 and r.axes["pratio_kfvp"].tolist() == RATIO3
+
+
+def test_inverted_map_old_style_values_run_along_y_first(tmp_path):
+    # 032HJ / 018J style: the unit that says rpm sits on the other list, values stored [ratio][rpm]
+    z = np.arange(9, dtype=float)
+    path = write(tmp_path, HEADER64, line64("KFVPDKSD", 3, 3, z, RPM3, RATIO3, x_unit="-", y_unit="U/min",
+                                            map_type="eZweiInv"))
+    r = parse_export(path, [KFVP])
+    assert r.rows[0].status == winols.STATUS_FLIPPED
+    np.testing.assert_array_equal(r.base_maps["base_kfvp"], z.reshape(3, 3).T)
+    assert r.axes["rpm_kfvp"].tolist() == RPM3
+
+
+def test_inverted_non_square_maps_both_styles(tmp_path):
+    z = np.arange(8, dtype=float)
+    rpm4, pct2 = [1000, 2000, 3000, 4000], [50, 95]
+    new = line64("KFLDRL", 2, 4, z, rpm4, pct2, x_unit="U/min", y_unit="%", map_type="eZweiInv")       # [rpm][%]
+    old = line64("KFPRG", 4, 2, z, [0, 22], rpm4, x_unit="U/min", y_unit="\xb0KW", map_type="eZweiInv")  # lists per definition
+    path = write(tmp_path, HEADER64, new, old)
+    r = parse_export(path, [TargetMap("KFLDRL", "rpm_boost", "kfldrl_x", "base_kfldrl", "B"),
+                            TargetMap("KFPRG", "rpm_prg", "vvt_prg", "base_kfprg", "SR")])
+    assert r.rows[0].status == winols.STATUS_FLIPPED and r.base_maps["base_kfldrl"].shape == (4, 2)
+    np.testing.assert_array_equal(r.base_maps["base_kfldrl"], z.reshape(4, 2))
+    assert r.axes["rpm_boost"].tolist() == rpm4 and r.axes["kfldrl_x"].tolist() == pct2
+    assert r.rows[1].status == winols.STATUS_TRANSPOSED and r.base_maps["base_kfprg"].shape == (4, 2)
+    np.testing.assert_array_equal(r.base_maps["base_kfprg"], z.reshape(4, 2))
+    assert r.axes["rpm_prg"].tolist() == rpm4 and r.axes["vvt_prg"].tolist() == [0, 22]
+
+
+def test_value_count_must_match_the_axes(tmp_path):
+    path = write(tmp_path, HEADER64, line64("KFZW", 3, 2, np.arange(5, dtype=float), [10, 50, 90], [1000, 2000]))
+    r = parse_export(path, [TargetMap("KFZW", "rpm_ign", "load_ign", "base_kfzw", "I")])
+    assert r.rows[0].status == winols.STATUS_MISMATCH

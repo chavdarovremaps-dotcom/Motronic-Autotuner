@@ -11,14 +11,23 @@ naming the fields. Fields used: ``IdName`` (index 1), ``Columns`` (13),
 map values, the x axis values and the y axis values, each a space
 separated list of numbers.
 
+Value order. For a map of type ``eZweidim`` the value list runs row by
+row with the y axis list down the rows and the x axis list along the
+columns. For the inverted type ``eZweiInv`` (the map shown with its axes
+swapped) two layouts exist. Older exports write the value list the same
+way, down the y list and along the x list, but their axis names and units
+describe the other list (the 032HJ export: AxisX says Motordrehzahl while
+AxisX.Values holds the VVT list). Newer exports keep names, units and
+lists consistent and write the values along the x list first (the 360288
+and 362287 exports). The two are told apart by whether the axis whose
+name or unit says rpm actually holds rpm values. ``Columns`` and ``Rows``
+do not describe the value order for inverted maps and are only used to
+flag that something was healed.
+
 Orientation: the tool keeps rpm on the rows of every map whose y axis key
-says rpm. Which exported axis is the rpm one is decided from the axis
-values first (an increasing list from at least 300 to at least 2000), and
-only when that is ambiguous from the export's axis names and units,
-because WinOLS has been seen to export the value lists swapped against
-the axis names (the 032HJ export) and to leave the names empty (the
-362287 export). A map whose value lists are swapped against its declared
-columns and rows is transposed back first.
+says rpm. Which axis list is the rpm one is decided from the values (an
+increasing list from at least 300 to at least 2000) and only when that is
+ambiguous from the names and units.
 """
 
 from __future__ import annotations
@@ -32,7 +41,7 @@ STATUS_LOADED = "Loaded"
 STATUS_DIRECT = "Loaded (Direct)"
 STATUS_FROM_JSON = "Loaded (From JSON)"
 STATUS_FLIPPED = "RPM Flipped"
-STATUS_TRANSPOSED = "Size Auto-Transposed"
+STATUS_TRANSPOSED = "Orientation Healed"
 STATUS_MISMATCH = "Axis Size Mismatch"
 STATUS_MATRIX_ERROR = "Matrix Error"
 STATUS_EMPTY = "Empty Data"
@@ -44,6 +53,8 @@ _RPM_NAME_WORDS = ("motordrehzahl", "rpm", "giri")
 _RPM_UNIT_WORDS = ("u/min", "rpm", "1/min", "giri")
 _LEGACY_X_NAME, _LEGACY_X_UNIT = 7, 8
 """Where the MATLAB code read the x axis name and unit; kept for exports without a header."""
+_LEGACY_TYPE = 3
+INVERTED_TYPE = "eZweiInv"
 RPM_AXIS_MIN, RPM_AXIS_TOP = 300.0, 2000.0
 
 
@@ -133,6 +144,33 @@ def _rpm_is_on_x(x: np.ndarray, y: np.ndarray, x_text: bool, y_text: bool) -> bo
     return x_text and not y_text
 
 
+def _rough(m: np.ndarray) -> float:
+    """Mean absolute second difference along both axes: a wrongly ordered map is jagged."""
+    total, n = 0.0, 0
+    for axis in (0, 1):
+        if m.shape[axis] >= 3:
+            d = np.diff(m, n=2, axis=axis)
+            total += float(np.abs(d).sum())
+            n += d.size
+    return total / n if n else 0.0
+
+
+def _values_run_x_first(z: np.ndarray, x: np.ndarray, y: np.ndarray, map_type: str,
+                        x_text: bool, y_text: bool) -> bool:
+    """True when the value list of an inverted map runs along the x list first
+    (newer exports). Decided from whether the axis called rpm holds rpm values;
+    for a map without an rpm axis and unequal axis lengths, from the smoother
+    reading."""
+    if map_type != INVERTED_TYPE:
+        return False
+    x_num, y_num = looks_like_rpm(x), looks_like_rpm(y)
+    if x_text or y_text:
+        return bool((x_text and x_num) or (y_text and y_num))
+    if x.size != y.size:
+        return _rough(z.reshape(x.size, y.size)) < _rough(z.reshape(y.size, x.size))
+    return False
+
+
 def find_map(lines: list[list[str]], winols_name: str) -> list[str] | None:
     """First export line whose map id equals ``winols_name`` or starts with ``winols_name + "_"``."""
     for parts in lines:
@@ -174,25 +212,19 @@ def _extract(parts: list[str], t: TargetMap, result: ImportResult, status: MapSt
     if x.size == 0 or y.size == 0 or z.size == 0:
         status.status = STATUS_EMPTY
         return
-    try:
-        z_matrix = z.reshape(num_rows, num_cols)
-    except ValueError:
-        status.status = STATUS_MATRIX_ERROR
+    if z.size != x.size * y.size:
+        status.status = STATUS_MISMATCH
+        status.dims = f"{z.size} values for {y.size} x {x.size}"
         return
-
-    # the value lists swapped against the declared columns and rows: transpose back
-    healed = False
-    if x.size != num_cols or y.size != num_rows:
-        if x.size == num_rows and y.size == num_cols and num_rows != num_cols:
-            z_matrix = z_matrix.T.copy()
-            healed = True
-        else:
-            status.status = STATUS_MISMATCH
-            return
+    type_index = header.get("Type", _LEGACY_TYPE)
+    map_type = parts[type_index].strip() if type_index < len(parts) else ""
+    x_text, y_text = _axis_text(parts, header)
+    x_first = _values_run_x_first(z, x, y, map_type, x_text, y_text)
+    z_matrix = z.reshape(x.size, y.size).T.copy() if x_first else z.reshape(y.size, x.size)
+    healed = x_first or x.size != num_cols or y.size != num_rows
     # from here z_matrix is (y.size, x.size): x along the columns, y down the rows
 
     expects_rpm_rows = "rpm" in t.y_axis_key.lower()
-    x_text, y_text = _axis_text(parts, header)
     if expects_rpm_rows and _rpm_is_on_x(x, y, x_text, y_text):
         result.base_maps[t.base_map_key] = z_matrix.T.copy()
         result.axes[t.x_axis_key] = y

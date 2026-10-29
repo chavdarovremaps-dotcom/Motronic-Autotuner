@@ -41,6 +41,12 @@ family means one `TargetMap` line and one generator wrapper.
   the cell, rounds up to whole map steps, and ignores averages under a
   floor (0.1 degree default) because bilinear weighting leaks slivers into
   neighbouring cells.
+- WinOLS import: an ``eZweiInv`` (inverted) map's value list runs along
+  the x list first in newer exports (360288, 362287) and along the y list
+  first in older ones (032HJ, 018J), told apart by whether the axis called
+  rpm holds rpm values; ``Columns`` / ``Rows`` do not describe the value
+  order. Profiles saved before 2026-10-29 hold scrambled or transposed
+  KFURL / KFPRG / KFVPDKSD base maps: re-import the export.
 - WinOLS import keeps rpm on the rows of every map whose y axis key says
   rpm. The rpm axis is recognised from its values (increasing, 300 to at
   least 2000) and only in doubt from the export's AxisX / AxisY name and
