@@ -60,6 +60,11 @@ family means one `TargetMap` line and one generator wrapper.
   gear change within 0.5 s, optional rpm floor (0 = off). The pedal is not
   a condition. A missing
   deviation channel is derived as target minus boost at ingest.
+- ME7 wastegate logs: the user forces the N75 output to fixed duties
+  (0, 10, 20 ... 95 %) while logging, so ldtvm, the modulated duty the
+  valve receives, is the duty source for KFLDRL and is quantised, while
+  ldtv (the PID output) sits at 95 % and means nothing in such logs.
+  Never use the duty as a condition for anything (spool, steady state).
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
   Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
   the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)
