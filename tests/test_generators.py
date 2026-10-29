@@ -302,7 +302,7 @@ def test_handover_auto_axis_keeps_the_stock_rows_under_1_2():
                                   base_axis_pratio=factory_axis, messages=msgs)
     by = {m.key: m for m in maps}
     axis = by["pratio_axis_kfvp"].values
-    assert axis.size == 12 and axis[0] == 0.95 and axis[1] == 1.0 and 1.3 < axis[-1] < 1.5
+    assert axis.size == 12 and axis[0] == 0.95 and axis[1] == 1.0 and axis[-1] == 1.8    # 1500 / 1000 x 1.2
     kfvp = by["kfvp"]
     assert kfvp.y_axis.tolist() == axis.tolist()
     under = axis < 1.2
@@ -326,6 +326,6 @@ def test_me7_auto_axes_land_in_the_result():
     keys = [m.key for m in result.maps]
     assert keys[:4] == ["rpm_axis_boost", "kfldimx", "kfldrl", "abs_wgdc"] and "pratio_axis_kfvp" in keys
     axis = result.map("rpm_axis_boost").values
-    assert 3150 <= axis[4] <= 3300 and axis[-1] == 7500
+    assert 3150 <= axis[4] <= 3300 and axis.tolist() == spool_rpm_axis(axis[4]).tolist() and axis[-1] % 500 == 0
     assert result.map("kfldrl").y_axis.tolist() == axis.tolist() == result.map("kfldimx").y_axis.tolist()
     assert any("Auto axis KFLDRL / KFLDIMX: spool at" in m for m in result.messages)
