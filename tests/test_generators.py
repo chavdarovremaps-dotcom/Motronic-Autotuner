@@ -7,7 +7,7 @@ import pytest
 from motronic_autotuner.core.logs import SplitLogs
 from motronic_autotuner.families.bosch_me7 import BOSCH_ME7, DEFAULT_VARS
 from motronic_autotuner.generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
-from motronic_autotuner.generators.boost_pid import duty_ratio, scale_rows
+from motronic_autotuner.generators.boost_pid import p_from_sensitivity, rescale_rows, steepest_rise
 from motronic_autotuner.generators.handover import generate_kfvpdksd, generate_handover_maps, pratio_axis_from_curve
 from motronic_autotuner.generators.ignition import generate_kfzw
 from motronic_autotuner.generators.manifold import generate_manifold_maps, generate_pbrk_maps
@@ -332,50 +332,88 @@ def test_me7_auto_axes_land_in_the_result():
     assert any("Auto axis KFLDRL / KFLDIMX: spool at" in m for m in result.messages)
 
 
-def test_duty_ratio_reads_the_sensitivity_from_kfldrl():
-    axis_x = np.array([0, 25, 50, 75, 95.0])
-    factory = np.array([[0, 20, 40, 60, 80.0], [0, 30, 50, 70, 90.0], [0, 10, 15, 20, 25.0]])   # rows: 3 rpm points
-    new = factory * 0.25
-    new[0, 1] = np.nan                                                 # one cell without data
-    ratio = duty_ratio(new, AXIS_RPM[:3], axis_x, factory, AXIS_RPM[:3], axis_x, min_file_duty=20)
-    np.testing.assert_allclose(ratio["per_rpm"][:2], 0.25)
-    assert ratio["cells"].tolist() == [3, 4, 2]                        # file duty >= 20 and data present
-    np.testing.assert_allclose(ratio["overall"], 0.25)
-    # a different ratio per rpm lands per row, or as one number
-    new[2] = factory[2] * 0.5
-    ratio = duty_ratio(new, AXIS_RPM[:3], axis_x, factory, AXIS_RPM[:3], axis_x, min_file_duty=20)
-    np.testing.assert_allclose(ratio["per_rpm"], [0.25, 0.25, 0.5])
-    base = np.ones((3, 4)) * 10
-    scaled, factor = scale_rows(base, AXIS_RPM[:3], ratio, "per_rpm")
-    np.testing.assert_allclose(scaled[:, 0], [2.5, 2.5, 5.0])
-    scaled, factor = scale_rows(base, AXIS_RPM[:3], ratio, "overall")
-    assert np.allclose(scaled, 10 * ratio["overall"]) and 0.25 < ratio["overall"] < 0.5
-    # a map on another rpm axis gets the per-rpm factor interpolated and clamped
-    scaled, factor = scale_rows(np.ones((2, 2)), np.array([500.0, 9000.0]), ratio, "per_rpm")
-    np.testing.assert_allclose(factor, [0.25, 0.5])
+
+def test_steepest_rise_and_p():
+    levels = np.array([20, 30, 40, 50, 60, 90.0])
+    boost = np.array([2000, 2100, 2300, 2400, 2450, 2600.0])          # the example from the brief
+    assert steepest_rise(levels, boost) == (200.0, 30.0, 40.0)
+    # duties closer than the minimum step are skipped, uneven steps are normalised to 10 %
+    assert steepest_rise(np.array([0, 10, 11, 14.0]), np.array([2000, 2200, 2260, 2263.0]))[0] == 200.0
+    assert np.isnan(steepest_rise(np.array([10, 20.0]), np.array([2000, 1990.0]))[0])
+    axis = np.array([2000, 3000, 4000, 5000, 6000.0])
+    table = np.column_stack([[1500, 1600], [1700, 1650], [2000, 2200], [2100, 2200], [np.nan, np.nan]])
+    res = p_from_sensitivity(np.array([10, 20.0]), table, axis, 3500)
+    np.testing.assert_allclose(res["p_raw"][2:4], [5.0, 10.0])
+    np.testing.assert_allclose(res["p_used"], [5.0, 5.0, 5.0, 10.0, 10.0])     # below the spool: first P after it
+    assert res["source"] == ["spool (4000)", "spool (4000)", "logs", "logs", "interpolated"]
 
 
-def test_me7_pid_scaling_follows_kfldrl():
+def test_rescale_rows_keeps_values_at_the_same_rpm():
+    base = np.array([[10, 20.0], [30, 40.0], [50, 60.0]])
+    out = rescale_rows(base, [1000, 2000, 3000], [500, 1500, 3500])
+    np.testing.assert_allclose(out, [[10, 20], [20, 30], [50, 60]])
+    np.testing.assert_allclose(rescale_rows(np.array([[1, 2, 3.0]]), [1000, 2000, 3000], [2500]), [2.5])
+
+
+def forced_duty_log(n=30000, seed=11):
+    """Open-loop pulls with the N75 forced to 0, 10, 14 or 20 %. Boost spools
+    from 2000 to 3200 rpm whatever the duty; after it boost = 2000 + 20 hPa per
+    % up to 10 % and 5 hPa per % above: steepest rise 200 hPa per 10 %, P = 5."""
+    rng = np.random.default_rng(seed)
+    d = synthetic_log(n, seed)
+    rpm = rng.uniform(1500, 6500, n)
+    duty = rng.choice([0.0, 10.0, 14.0, 20.0], n)
+    full = 2000 + np.where(duty <= 10, 20 * duty, 200 + 5 * (duty - 10))
+    spooling = np.clip((rpm - 2000) / 1200, 0, 1)
+    boost = np.where(rpm < 3200, 1000 + spooling * 1000 + rng.normal(0, 40, n), full + rng.normal(0, 5, n))
+    d[V["rpm"]], d[V["boost"]], d[V["wgdc"]], d[V["pedal"]] = rpm, boost, duty, 100.0
+    return d
+
+
+def pid_preset():
     preset = BOSCH_ME7.default_preset()
-    axis_boost = np.array([250, 500, 750, 1000, 1250.0])
-    kfldrl_x = np.arange(0, 100, 10.0)
-    preset.axes = {"rpm_boost": AXIS_RPM, "boost": axis_boost, "kfldrl_x": kfldrl_x,
-                   "rpm_kfldrq0": np.array([1000, 3000, 6000.0]), "x_kfldrq0": np.array([100, 400.0]),
-                   "rpm_kfldrapp": np.array([1000, 6000.0]), "x_kfldrapp": np.array([0, 100.0])}
-    preset.base_maps = {"base_kfldrq0": np.full((3, 2), 40.0), "base_kfldrapp": np.full((2, 2), 10.0)}
-    data = synthetic_log(n=20000)
+    q_rpm, dev = np.array([1000, 3000, 6000.0]), np.array([100, 200, 400, 700.0])
+    preset.axes = {"rpm_boost": AXIS_RPM, "boost": np.array([250, 500, 750, 1000, 1250.0]),
+                   "kfldrl_x": np.arange(0, 100, 10.0), "rpm_ldrq1st": q_rpm, "row_ldrq1st": np.array([0.0])}
+    preset.base_maps = {"base_ldrq1st": np.array([[1.0, 2.0, 3.0]])}
+    for i, key in enumerate(("kfldrq0", "kfldrq1", "kfldrq2")):
+        preset.axes[f"rpm_{key}"], preset.axes[f"x_{key}"] = q_rpm, dev
+        preset.base_maps[f"base_{key}"] = np.tile(np.array([[40.0], [30.0], [20.0]]) * (i + 1), (1, 4))
+    return preset
+
+
+def test_me7_pid_p_from_the_boost_sensitivity():
+    preset = pid_preset()
+    data = forced_duty_log()
     logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
-    # without the file's KFLDRL the PID generator is skipped
     result = BOSCH_ME7.run_all(preset, logs)
-    assert any("Boost PID" in r.name and "Missing base maps" in r.status for r in result.rows)
-    # with a file whose KFLDRL asks four times the duty the logs show, the gains come down to a quarter
-    kfldrl = result.map("kfldrl").values
-    preset.base_maps["base_kfldrl"] = np.nan_to_num(kfldrl * 4.0, nan=50.0)
-    result = BOSCH_ME7.run_all(preset, logs)
-    scale = result.map("ldr_scale")
-    assert scale is not None and 0.24 < float(scale.title.split("overall ")[1].rstrip(")")) < 0.26
+    assert result.map("rpm_axis_ldrq").values.tolist() == AXIS_RPM.tolist()
     q0 = result.map("kfldrq0_corrected")
-    np.testing.assert_allclose(q0.values, 10.0, rtol=0.05)
-    assert q0.y_axis.tolist() == [1000, 3000, 6000] and result.map("kfldrapp_corrected") is not None
-    assert any("Boost PID scaling: the logs need 0.25" in m for m in result.messages)
-    assert any("KFLDRQ1 not imported" in m for m in result.messages)
+    assert q0.y_axis.tolist() == AXIS_RPM.tolist() and q0.x_axis.tolist() == [100, 200, 400, 700]
+    assert (q0.values == q0.values[:, :1]).all()                          # one P in all four deviation bands
+    p_col = q0.values[:, 0]
+    np.testing.assert_allclose(p_col[AXIS_RPM >= 4000], 5.0, rtol=0.05)
+    sens = result.map("ldr_sensitivity")
+    spool = [m for m in result.messages if "spool at" in m][0]
+    first_after = np.flatnonzero(np.array(sens.values[3]) > 0)            # P from the logs
+    assert (p_col[: first_after[0]] == p_col[first_after[0]]).all()        # below the spool: the first P after it
+    assert "the points below it take the first P after it" in spool
+    # I, D and LDRQ1ST: same values at the same rpm, on the new axis
+    np.testing.assert_allclose(result.map("kfldrq1_corrected").values[:, 0], np.interp(AXIS_RPM, [1000, 3000, 6000], [80, 60, 40]))
+    np.testing.assert_allclose(result.map("ldrq1st_corrected").values, np.interp(AXIS_RPM, [1000, 3000, 6000], [1, 2, 3]))
+    assert result.map("ldr_boost_per_duty").y_axis == ["0 %", "10 %", "14 %", "20 %"]
+
+
+def test_me7_pid_duty_ratio_mode():
+    preset = pid_preset()
+    preset.params["ldr_mode"] = "overall"
+    data = forced_duty_log(n=20000)
+    logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
+    result = BOSCH_ME7.run_all(preset, logs)
+    assert any("duty-ratio rule needs KFLDRL" in m for m in result.messages)
+    np.testing.assert_allclose(result.map("kfldrq2_corrected").values[:, 0], np.interp(AXIS_RPM, [1000, 3000, 6000], [120, 90, 60]))
+    preset.base_maps["base_kfldrl"] = np.nan_to_num(result.map("kfldrl").values * 4.0, nan=50.0)
+    result = BOSCH_ME7.run_all(preset, logs)
+    assert any("the logs need 0.25" in m for m in result.messages)
+    np.testing.assert_allclose(result.map("kfldrq0_corrected").values[:, 0],
+                               np.interp(AXIS_RPM, [1000, 3000, 6000], [40, 30, 20]) * 0.25, rtol=0.03)

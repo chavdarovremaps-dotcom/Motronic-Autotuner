@@ -71,15 +71,20 @@ family means one `TargetMap` line and one generator wrapper.
   valve receives, is the duty source for KFLDRL and is quantised, while
   ldtv (the PID output) sits at 95 % and means nothing in such logs.
   Never use the duty as a condition for anything (spool, steady state).
-- Boost PID scaling (ME7, 2026-10-29): the user's rule. The ratio of the
-  duty the logs need (the computed KFLDRL) over the duty in the file (the
-  imported KFLDRL), summed over the cells where the file's duty is at
-  least 20 % (parameter), scales KFLDRQ0, KFLDRQ1, KFLDRQ2 and KFLDRAPP
-  (tick), as one overall ratio (default) or per rpm. A car that needs
-  20 % where the file expected 80 % gets its gains times 0.25. The file's
-  KFLDRL is the reference: import the stock export when the working file's
-  KFLDRL was already changed. The spool phase of a pull never calibrates
-  gains (P and I are at their limits there), so this stays the method.
+- Boost PID (ME7, 2026-10-29). KFLDRQ0 / Q1 / Q2 and the curve LDRQ1ST
+  share one ROM rpm axis; all four go onto the KFLDRL rpm axis (the auto
+  spool axis when ticked), Q1 / Q2 / LDRQ1ST keeping their values at the
+  same rpm. P (KFLDRQ0, same value in all four deviation bands) comes from
+  the forced-duty logs: per rpm point the mean boost per duty (rounded to
+  1 %, at least 10 samples), the steepest rise between duties at least 4 %
+  apart normalised to 10 % duty, P = 1000 / that rise (200 hPa per 10 %
+  gives 5 %/100 hPa). Points below the spool rpm take the first P after
+  it; gaps after it are interpolated. I and D are set by hand from there.
+  The duty-ratio rule (scale all three by logs / file duty from KFLDRL)
+  stays as a choice. KFLDRAPP is only used for open-loop logging (code
+  word set to 8) and is never touched. The in-between duties in the logs
+  (15 to 33 % at 5100 to 6500 rpm) are KFLDRAPP interpolating between its
+  rpm rows, held a fraction of a second each.
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
   Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
   the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)
