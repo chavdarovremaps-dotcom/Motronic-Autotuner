@@ -63,7 +63,8 @@ family means one `TargetMap` line and one generator wrapper.
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
   Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
   the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)
-  of the peak, on WOT rows with duty within 5 % of the highest duty; the
+  of the peak bin median, on all WOT rows (no duty condition: on the 032BJ
+  the modulated duty never passed 34 % and rose only above 6000 rpm); the
   axis is spool - 1000 .. spool - 250, spool, + 250 .. + 1250, then 500
   steps snapped to multiples of 500 (3300 gives 2300 .. 4550, 5000 .. 7500).
   KFVPDKSD ratio axis: 0.95, 1.0, then even steps to 1.2 x the base-WG peak

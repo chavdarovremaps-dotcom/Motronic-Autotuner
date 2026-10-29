@@ -8,7 +8,7 @@ import numpy as np
 from ..core.logs import hack_5120
 from ..core.winols import TargetMap
 from ..generators import axis_block, column
-from ..generators.boost import SPOOL_DUTY_WINDOW, detect_spool_rpm, generate_boost_maps, spool_rpm_axis
+from ..generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
 from ..generators.fuel import generate_fkkvs
 from ..generators.handover import generate_handover_maps
 from ..generators.ignition import generate_kfzw
@@ -119,17 +119,16 @@ def _boost(ctx: RunContext):
     blocks = []
     if bool(ctx.p("auto_axis_kfldrl", False)):
         rel = column(d, p.var("boost")) - (column(d, p.var("pu")) if cwldimx else ambient)
-        spool, info = detect_spool_rpm(column(d, p.var("rpm")), rel, column(d, p.var("wgdc")),
-                                       share=float(ctx.p("spool_boost_share", 90)))
+        spool, info = detect_spool_rpm(column(d, p.var("rpm")), rel, share=float(ctx.p("spool_boost_share", 90)))
         if spool is None:
-            ctx.messages.append(f"Auto axis KFLDRL: no spool point found ({info.get('rows', 0)} rows with duty >= "
-                                f"{info.get('min_duty', 0):.0f} %), factory axis kept.")
+            ctx.messages.append(f"Auto axis KFLDRL: no spool point found in {info.get('rows', 0)} WOT rows, "
+                                "factory axis kept.")
         else:
             axis_rpm = spool_rpm_axis(spool)
             ctx.messages.append(
-                f"Auto axis KFLDRL / KFLDIMX: spool at {spool:.0f} rpm ({info['share']:g} % of {info['peak']:.0f} hPa "
-                f"relative boost, {info['rows']} rows with duty within {SPOOL_DUTY_WINDOW:g} % of {info['top_duty']:.0f} %); "
-                f"axis {', '.join(f'{a:g}' for a in axis_rpm)}.")
+                f"Auto axis KFLDRL / KFLDIMX: spool at {spool:.0f} rpm, where the median relative boost reaches "
+                f"{info['boost_at_spool']:.0f} hPa ({info['share']:g} % of the {info['peak']:.0f} hPa peak at "
+                f"{info['peak_rpm']:.0f} rpm, {info['rows']} WOT rows); axis {', '.join(f'{a:g}' for a in axis_rpm)}.")
             blocks.append(axis_block("rpm_axis_boost", "KFLDRL / KFLDIMX RPM axis (paste into WinOLS)", axis_rpm, "RPM"))
     maps = generate_boost_maps(
         d, p.vars,

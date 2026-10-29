@@ -273,13 +273,13 @@ def test_spool_rpm_axis_layout():
     assert spool_rpm_axis(3000).tolist()[-1] == 7000 and spool_rpm_axis(3000).size == 16
 
 
-def test_detect_spool_rpm_from_the_gate_shut_rows():
+def test_detect_spool_rpm_from_the_wot_rows():
     d = spool_log()
-    spool, info = detect_spool_rpm(d[V["rpm"]], d[V["boost"]] - 1000, d[V["wgdc"]])
-    assert 3150 <= spool <= 3300 and info["top_duty"] == 95.0 and info["peak"] > 1100
+    spool, info = detect_spool_rpm(d[V["rpm"]], d[V["boost"]] - 1000)
     # 90 % of 1200 over ambient is reached 80 rpm before full boost: 3300 - 0.1 * 800 = 3220
+    assert 3150 <= spool <= 3300 and info["peak"] > 1100 and info["boost_at_spool"] >= info["target"]
     assert spool_rpm_axis(spool)[4] == spool
-    none, info = detect_spool_rpm(d[V["rpm"]][:2], d[V["boost"]][:2], d[V["wgdc"]][:2])
+    none, info = detect_spool_rpm(d[V["rpm"]][:2], d[V["boost"]][:2])
     assert none is None
 
 
