@@ -35,6 +35,14 @@ class ParamSpec:
     x_label: str = ""
     y_label: str = ""
     """For ``kind == "curve"``: the row labels of the breakpoints and of the values."""
+    section: str = ""
+    """Tab of the settings panel. A family that names sections gets one tab per section, groups as boxes in it."""
+    unit: str = ""
+    """Shown after the number in the field."""
+    tip: str = ""
+    """Tooltip: the longer explanation, so the label can stay short."""
+    enabled_when: tuple[str, Any] = ()
+    """``(key, value)`` or ``(key, (values, ...))``: the field is editable only while that setting has that value."""
 
 
 @dataclass(frozen=True)

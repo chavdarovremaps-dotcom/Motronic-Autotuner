@@ -71,6 +71,37 @@ family means one `TargetMap` line and one generator wrapper.
   valve receives, is the duty source for KFLDRL and is quantised, while
   ldtv (the PID output) sits at 95 % and means nothing in such logs.
   Never use the duty as a condition for anything (spool, steady state).
+- KFLDRL (ME7 and the Opel families, 2026-11-02), on by default:
+  - Each rpm row is interpolated between the duty levels logged at that rpm.
+    The levels are rounded to whole percent and need at least 3 samples.
+  - Boost is made to rise with duty by an isotonic fit, so a stray point is
+    pooled with its neighbours.
+  - A column within a quarter step above a row's top boost takes the top
+    duty.
+  - This replaces the splat's flat treads, where one forced level filled two
+    columns with the same duty.
+  - Then the finish, after the user's hand edits on the Seat Leon 1.8T
+    (366426):
+    - Column 0 is 0 %.
+    - Rows rise with the target.
+    - Holes are linear in boost.
+    - Spooled rows reach 90 % (the spool share) of the highest boost of any
+      row. Their unreached targets get the highest duty logged in those rows.
+    - The row just below the first spooled row takes that row's duties.
+    - Rows further down get 95 %, with the first unreached cell bridged at
+      the spool-side row's highest duty.
+  - On the Leon this is within 1.6 % duty of the hand map from 2750 rpm up.
+    The spool row lands one row later than the hand map (2750 instead of
+    2500), because the splat had credited 2950 rpm samples to 2750.
+  - The splat and the old fill stay selectable.
+  - The PID duty-ratio mode only uses cells with log weight.
+- Settings panel: ParamSpec has section, unit, tip and enabled_when.
+  - A family that names sections gets one tab per section, scrolling on its
+    own.
+  - ME7 and the Opel families have General, Boost and Airflow tabs.
+  - Labels are short, and the long explanation is in the tooltip.
+  - The safety_margin field is gone from the form: it was never applied,
+    not even in MATLAB.
 - MAF check (ME7, 2026-11-02), information only: ml_w against the airflow
   at a reference VE (90 %, parameter) from pvdks_w (not ps_w, which is the
   ECU's MAF-based model), tanslin (after the intercooler on the 1.8T) and

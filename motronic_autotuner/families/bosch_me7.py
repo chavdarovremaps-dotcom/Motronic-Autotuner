@@ -8,7 +8,7 @@ import numpy as np
 from ..core.logs import hack_5120
 from ..core.winols import TargetMap
 from ..generators import axis_block, column
-from ..generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
+from ..generators.boost import DUTY_OUT_OF_REACH, detect_spool_rpm, generate_boost_maps, spool_rpm_axis
 from ..generators.boost_pid import MIN_DUTY_STEP, MIN_LEVEL_SAMPLES, generate_pid_maps
 from ..generators.fuel import generate_fkkvs
 from ..generators.maf_check import DEFAULT_MIN_THROTTLE, DEFAULT_VE, DISPLACEMENT_1_8T, generate_maf_check
@@ -62,49 +62,111 @@ DEFAULT_PREP = {
     "pressure_columns": ["pvdks_w", "pu", "pssol_w", "pvdk_w", "plgru_w", "ps_w"],
 }
 
-PARAMS = [
-    ParamSpec("vvt_enabled", "VVT system", "bool", False, group="VVT Settings"),
-    ParamSpec("vvt_threshold", "VVT threshold (deg)", "float", 18.0, group="VVT Settings"),
-    ParamSpec("cwldimx", "CWLDIMX (relative to logged ambient)", "bool", False, group="Boost & Wastegate Settings"),
-    ParamSpec("min_samples_base_wg", "Min samples (base WG)", "int", 1, group="Boost & Wastegate Settings", minimum=0),
-    ParamSpec("safety_margin", "WGDC safety margin", "float", 1.0, group="Boost & Wastegate Settings"),
-    ParamSpec("auto_axis_kfldrl", "Auto axis KFLDRL / KFLDIMX RPM (5th point at the spool rpm)", "bool", False,
-              group="Boost & Wastegate Settings"),
-    ParamSpec("spool_boost_share", "Spool point: share of the peak boost (%)", "float", 90.0,
-              group="Boost & Wastegate Settings", minimum=50, maximum=100),
-    ParamSpec("auto_axis_kfvp", "Auto axis KFVPDKSD (0.95, 1.0, even to 1.2 x base-WG peak ratio; rows under 1.2 stock)",
-              "bool", False, group="Boost & Wastegate Settings"),
-    ParamSpec("ldr_mode", "KFLDRQ0 / Q1 / Q2", "choice", "sensitivity", group="Boost PID",
-              choices=(("P from the boost sensitivity in the logs (I and D unchanged)", "sensitivity"),
-                       ("Scale P, I and D by the duty ratio logs / file, one ratio", "overall"),
-                       ("Scale P, I and D by the duty ratio logs / file, per rpm", "per_rpm"))),
-    ParamSpec("ldr_min_samples", "Sensitivity: min samples per duty and rpm point", "float", MIN_LEVEL_SAMPLES,
-              group="Boost PID", minimum=0),
-    ParamSpec("ldr_min_duty_step", "Sensitivity: compare duties at least (%) apart", "float", MIN_DUTY_STEP,
-              group="Boost PID", minimum=0.5, maximum=50),
-    ParamSpec("ldr_min_file_duty", "Duty ratio: use KFLDRL cells where the file's duty is at least (%)", "float", 20.0,
-              group="Boost PID", minimum=0, maximum=100),
-    ParamSpec("maf_ve", "Reference volumetric efficiency (%)", "float", DEFAULT_VE, group="MAF Check",
-              minimum=10, maximum=150),
-    ParamSpec("maf_displacement", "Engine displacement (cc)", "float", DISPLACEMENT_1_8T, group="MAF Check",
-              minimum=100, maximum=10000),
-    ParamSpec("maf_min_throttle", "Use rows with the throttle at least (%)", "float", DEFAULT_MIN_THROTTLE,
-              group="MAF Check", minimum=0, maximum=100),
-    ParamSpec("min_samples", "Min samples per cell", "int", 1, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("trim_format", "Fuel trim format", "choice", "lambda", group="General Math & Fuel Settings",
-              choices=(("Lambda (factor, e.g. 1.05)", "lambda"), ("Percent (e.g. 5)", "percent"))),
-    ParamSpec("fill_missing_data", "Fill missing data (KFLDRL)", "bool", False, group="General Math & Fuel Settings"),
-    ParamSpec("max_rpm_roc", "Max RPM ROC (RPM/s)", "float", 1000.0, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("max_throttle_roc", "Max pedal ROC (%/s)", "float", 33.0, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("ambient_pressure", "Ambient pressure (hPa)", "float", 1000.0, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("temp_max", "Warmup max temp (C)", "float", 80.0, group="General Math & Fuel Settings"),
-    ParamSpec("wot_min", "WOT minimum pedal (%)", "float", 70.0, group="General Math & Fuel Settings", minimum=0, maximum=100),
-    ParamSpec("fit_load_max", "Fit KFURL / KFPRG on loads up to (%) (0 = all loads)", "float", 0.0,
-              group="Intake Manifold Model", minimum=0, maximum=400),
-    ParamSpec("pbrk_apply", "KFPBRK factor acts on", "choice", "pressure", group="Intake Manifold Model",
-              choices=(("Manifold pressure before residual gas: rl = (ps x f - KFPRG) x KFURL", "pressure"),
-                       ("Load: rl = (ps - KFPRG) x KFURL x f", "load"))),
+GENERAL, BOOST, AIRFLOW = "General", "Boost", "Airflow"
+
+LOG_SPLIT = [
+    ParamSpec("wot_min", "WOT: pedal at least", "float", 70.0, section=GENERAL, group="Log split", unit="%",
+              decimals=0, minimum=0, maximum=100,
+              tip="Rows with the pedal at or above this are the WOT set: boost maps, PID and KFVPDKSD."),
+    ParamSpec("temp_max", "Warm-up: coolant below", "float", 80.0, section=GENERAL, group="Log split", unit="C",
+              decimals=0, tip="Rows under this coolant temperature are the warm-up set, the rest the hot set."),
 ]
+TRANSIENTS = [
+    ParamSpec("max_rpm_roc", "RPM change at most", "float", 1000.0, section=GENERAL, group="Transient filter",
+              unit="rpm/s", decimals=0, minimum=0, tip="Rows where the rpm changes faster are dropped."),
+    ParamSpec("max_throttle_roc", "Pedal change at most", "float", 33.0, section=GENERAL, group="Transient filter",
+              unit="%/s", decimals=0, minimum=0, tip="Rows where the pedal moves faster are dropped."),
+]
+MAPS = [
+    ParamSpec("min_samples", "Min samples per cell", "int", 1, section=GENERAL, group="Maps", minimum=0,
+              tip="Fuel, warm-up, ignition, manifold model and MAF check: cells with less weight stay empty."),
+    ParamSpec("trim_format", "Fuel trim format", "choice", "lambda", section=GENERAL, group="Maps",
+              choices=(("Lambda (factor, e.g. 1.05)", "lambda"), ("Percent (e.g. 5)", "percent"))),
+]
+VVT = [
+    ParamSpec("vvt_enabled", "Engine has VVT", "bool", False, section=GENERAL, group="VVT",
+              tip="KFURL / KFPRG and KFPBRK / KFPBRKNW split by cam position."),
+    ParamSpec("vvt_threshold", "Cam on above", "float", 18.0, section=GENERAL, group="VVT", unit="deg", decimals=1,
+              tip="Cam position (wnwi_w) splitting the cam-off and cam-on rows, for the manifold model and KFZW."),
+]
+PRESSURE_REFERENCE = [
+    ParamSpec("cwldimx", "Relative to logged pu (CWLDIMX)", "bool", False, section=BOOST, group="Pressure reference",
+              tip="Relative boost = pvdks_w - pu. Off: pvdks_w minus the ambient pressure below."),
+    ParamSpec("ambient_pressure", "Ambient pressure", "float", 1000.0, section=BOOST, group="Pressure reference",
+              unit="hPa", decimals=0, minimum=0,
+              tip="Relative boost when CWLDIMX is off, and the reference of the KFVPDKSD pressure ratio."),
+]
+KFLDRL = [
+    ParamSpec("auto_axis_kfldrl", "Auto rpm axis around the spool", "bool", False, section=BOOST,
+              group="KFLDRL / KFLDIMX",
+              tip="Rebuilds the KFLDRL / KFLDIMX rpm axis: 5th point at the spool rpm, 250 rpm steps to the "
+                  "10th point, 500 rpm steps after it."),
+    ParamSpec("spool_boost_share", "Spool: share of the peak boost", "float", 90.0, section=BOOST,
+              group="KFLDRL / KFLDIMX", unit="%", decimals=0, minimum=50, maximum=100,
+              tip="The spool is where the boost first reaches this share of the peak. Used by the auto axis, "
+                  "the KFLDRL finish and the PID."),
+    ParamSpec("kfldrl_method", "Cells from", "choice", "rows", section=BOOST, group="KFLDRL / KFLDIMX",
+              choices=(("Each rpm row between the logged duty levels", "rows"),
+                       ("Bilinear splat (old)", "splat")),
+              tip="Rows: the duty for a column's boost is interpolated between the duty levels logged at that "
+                  "rpm, so one forced level no longer fills two columns with the same duty."),
+    ParamSpec("kfldrl_level_samples", "Min samples per duty level and rpm", "float", 3.0, section=BOOST,
+              group="KFLDRL / KFLDIMX", decimals=0, minimum=0,
+              tip="A duty level counts at an rpm point with at least this weight; drops stray rows such as a "
+                  "duty change while the boost still lags."),
+    ParamSpec("min_samples_base_wg", "Min samples per cell", "int", 1, section=BOOST, group="KFLDRL / KFLDIMX",
+              minimum=0, tip="The splat KFLDRL, the absolute WGDC map and the base-WG curve behind KFVPDKSD."),
+    ParamSpec("kfldrl_finish", "Finish the map", "bool", True, section=BOOST, group="KFLDRL finish",
+              tip="Column 0 at 0 %, every row rising with the target, empty cells by spool region: 95 % below "
+                  "the spool, the spooled row's duties on the row just below it, the highest logged duty above it."),
+    ParamSpec("kfldrl_out_of_reach", "Below the spool, unreached targets", "float", 95.0, section=BOOST,
+              group="KFLDRL finish", unit="%", decimals=1, minimum=0, maximum=95,
+              enabled_when=("kfldrl_finish", True),
+              tip="Duty for the targets a row below the spool never reached: gate shut for the fastest spool. "
+                  "The first such cell is bridged at the duty the turbo holds after the spool."),
+    ParamSpec("fill_missing_data", "Fill empty cells by interpolation (old)", "bool", False, section=BOOST,
+              group="KFLDRL finish", enabled_when=("kfldrl_finish", False),
+              tip="Only with the finish off: linear inside the data, nearest outside it, last column 100 %."),
+]
+KFVPDKSD = [
+    ParamSpec("auto_axis_kfvp", "Auto pressure-ratio axis", "bool", False, section=BOOST, group="KFVPDKSD",
+              tip="0.95, 1.0, then even steps to 1.2 x the base-WG peak ratio; rows under 1.2 stay stock."),
+]
+PID = [
+    ParamSpec("ldr_mode", "KFLDRQ0 / Q1 / Q2", "choice", "sensitivity", section=BOOST, group="Boost PID",
+              choices=(("P from the boost sensitivity (I, D unchanged)", "sensitivity"),
+                       ("P, I, D x duty ratio logs / file, one ratio", "overall"),
+                       ("P, I, D x duty ratio logs / file, per rpm", "per_rpm"))),
+    ParamSpec("ldr_min_samples", "Min samples per duty level and rpm", "float", MIN_LEVEL_SAMPLES, section=BOOST,
+              group="Boost PID", decimals=0, minimum=0, enabled_when=("ldr_mode", "sensitivity")),
+    ParamSpec("ldr_min_duty_step", "Compare duties at least", "float", MIN_DUTY_STEP, section=BOOST,
+              group="Boost PID", unit="% apart", decimals=1, minimum=0.5, maximum=50,
+              enabled_when=("ldr_mode", "sensitivity")),
+    ParamSpec("ldr_min_file_duty", "KFLDRL cells with file duty from", "float", 20.0, section=BOOST,
+              group="Boost PID", unit="%", decimals=0, minimum=0, maximum=100,
+              enabled_when=("ldr_mode", ("overall", "per_rpm")),
+              tip="Duty ratio logs / file: only KFLDRL cells where the file's duty is at least this."),
+]
+MANIFOLD = [
+    ParamSpec("fit_load_max", "Fit KFURL / KFPRG on loads up to", "float", 0.0, section=AIRFLOW,
+              group="Intake manifold model", unit="%", decimals=0, minimum=0, maximum=400, tip="0 = all loads."),
+    ParamSpec("pbrk_apply", "KFPBRK factor acts on", "choice", "pressure", section=AIRFLOW,
+              group="Intake manifold model",
+              choices=(("Pressure: rl = (ps x f - KFPRG) x KFURL", "pressure"),
+                       ("Load: rl = (ps - KFPRG) x KFURL x f", "load")),
+              tip="Pressure: on the manifold pressure before the residual gas is taken off. Load: on the result."),
+]
+MAF = [
+    ParamSpec("maf_ve", "Reference VE", "float", DEFAULT_VE, section=AIRFLOW, group="MAF check (information only)",
+              unit="%", decimals=0, minimum=10, maximum=150),
+    ParamSpec("maf_displacement", "Displacement", "float", DISPLACEMENT_1_8T, section=AIRFLOW,
+              group="MAF check (information only)", unit="cc", decimals=0, minimum=100, maximum=10000),
+    ParamSpec("maf_min_throttle", "Throttle at least", "float", DEFAULT_MIN_THROTTLE, section=AIRFLOW,
+              group="MAF check (information only)", unit="%", decimals=0, minimum=0, maximum=100,
+              tip="Only rows with the throttle (wdkba) at or above this: the check needs a wide-open throttle."),
+]
+
+PARAMS = LOG_SPLIT + TRANSIENTS + MAPS + VVT + PRESSURE_REFERENCE + KFLDRL + KFVPDKSD + PID + MANIFOLD + MAF
 
 TARGET_MAPS = [
     TargetMap("KFLDIMX", "rpm_boost", "boost", "base_kfldimx", "Boost Control"),
@@ -145,7 +207,8 @@ def _spool(ctx: RunContext, d):
 
 def _boost(ctx: RunContext):
     """KFLDIMX / KFLDRL; with the auto-axis tick the rpm axis is rebuilt around
-    the spool point found in the WOT rows and written out as a block."""
+    the spool point found in the WOT rows and written out as a block. A
+    family without the KFLDRL method / finish settings keeps the splat."""
     p = ctx.preset
     d = ctx.logs.wot
     cwldimx = bool(ctx.p("cwldimx", False))
@@ -170,7 +233,10 @@ def _boost(ctx: RunContext):
         min_samples=float(ctx.p("min_samples_base_wg", 1)),
         fill_missing=bool(ctx.p("fill_missing_data", False)),
         axis_rpm=axis_rpm, axis_boost=p.axis("boost"), axis_kfldrl_x=p.axis("kfldrl_x"),
-        safety_margin=float(ctx.p("safety_margin", 0)),
+        method=str(ctx.p("kfldrl_method", "splat")), finish=bool(ctx.p("kfldrl_finish", False)),
+        spool_share=float(ctx.p("spool_boost_share", 90)),
+        out_of_reach=float(ctx.p("kfldrl_out_of_reach", DUTY_OUT_OF_REACH)),
+        level_min_samples=float(ctx.p("kfldrl_level_samples", 3)), messages=ctx.messages,
     )
     return _on_sheet(blocks + maps, "Boost")
 

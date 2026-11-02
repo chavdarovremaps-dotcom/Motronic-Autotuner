@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget,
+    QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
 
 from ...families.base import Family
@@ -54,10 +54,7 @@ class IngestionTab(QWidget):
         lv.addWidget(box)
 
         self.form = ParamForm(self.family.params)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.form)
-        lv.addWidget(scroll, 1)
+        lv.addWidget(self.form, 1)
         splitter.addWidget(left)
 
         right = QWidget()

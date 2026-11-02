@@ -224,7 +224,10 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
         if kfldrl is None or factory_kfldrl is None:
             messages.append("Boost PID: the duty-ratio rule needs KFLDRL from the logs and from the file, nothing scaled.")
         else:
-            ratio = duty_ratio(kfldrl.values, kfldrl.y_axis, kfldrl.x_axis, factory_kfldrl, factory_axis_rpm,
+            logged = np.asarray(kfldrl.values, dtype=float)
+            if kfldrl.counts is not None:  # the finish fills cells without logs; only logged cells give a ratio
+                logged = np.where(np.asarray(kfldrl.counts) > 0, logged, np.nan)
+            ratio = duty_ratio(logged, kfldrl.y_axis, kfldrl.x_axis, factory_kfldrl, factory_axis_rpm,
                                factory_axis_x, min_file_duty=min_file_duty)
             if not np.isfinite(ratio["overall"]):
                 messages.append(f"Boost PID: no KFLDRL cell with data where the file's duty is at least "

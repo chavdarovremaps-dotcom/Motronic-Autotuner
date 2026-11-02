@@ -22,6 +22,8 @@ shows otherwise.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 
@@ -78,35 +80,22 @@ DEFAULT_PREP = {
 }
 
 PARAMS = [
-    ParamSpec("cwldimx", "CWLDIMX (relative to logged ambient; needs pu logged)", "bool", False,
-              group="Boost & Wastegate Settings"),
-    ParamSpec("min_samples_base_wg", "Min samples (base WG)", "int", 1, group="Boost & Wastegate Settings", minimum=0),
-    ParamSpec("safety_margin", "WGDC safety margin", "float", 1.0, group="Boost & Wastegate Settings"),
-    ParamSpec("auto_axis_kfldrl", "Auto axis KFLDRL / KFLDIMX RPM (5th point at the spool rpm)", "bool", False,
-              group="Boost & Wastegate Settings"),
-    ParamSpec("spool_boost_share", "Spool point: share of the peak boost (%)", "float", 90.0,
-              group="Boost & Wastegate Settings", minimum=50, maximum=100),
-    ParamSpec("auto_axis_kfvp", "Auto axis KFVPDKSD (0.95, 1.0, even to 1.2 x base-WG peak ratio; rows under 1.2 stock)",
-              "bool", False, group="Boost & Wastegate Settings"),
-    ParamSpec("min_samples", "Min samples per cell", "int", 1, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("trim_format", "Fuel trim format", "choice", "lambda", group="General Math & Fuel Settings",
-              choices=(("Lambda (factor, e.g. 1.05)", "lambda"), ("Percent (e.g. 5)", "percent"))),
-    ParamSpec("fill_missing_data", "Fill missing data (KFLDRL)", "bool", False, group="General Math & Fuel Settings"),
-    ParamSpec("max_rpm_roc", "Max RPM ROC (RPM/s)", "float", 1000.0, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("max_throttle_roc", "Max pedal ROC (%/s)", "float", 33.0, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("ambient_pressure", "Ambient pressure (hPa)", "float", 1000.0, group="General Math & Fuel Settings", minimum=0),
-    ParamSpec("temp_max", "Warmup max temp (C)", "float", 80.0, group="General Math & Fuel Settings"),
-    ParamSpec("wot_min", "WOT minimum pedal (%)", "float", 70.0, group="General Math & Fuel Settings", minimum=0, maximum=100),
-    ParamSpec("fit_load_max", "Fit KFURL / KFPRG on loads up to (%) (0 = all loads)", "float", 0.0,
-              group="Intake Manifold Model", minimum=0, maximum=400),
-    ParamSpec("pbrk_apply", "KFPBRK factor acts on", "choice", "pressure", group="Intake Manifold Model",
-              choices=(("Manifold pressure before residual gas: rl = (ps x f - KFPRG) x KFURL", "pressure"),
-                       ("Load: rl = (ps - KFPRG) x KFURL x f", "load"))),
-    ParamSpec("knock_source", "Knock signal", "choice", "average", group="Ignition Knock",
+    *me7.LOG_SPLIT,
+    *me7.TRANSIENTS,
+    ParamSpec("overrun_pedal", "Overrun: pedal below", "float", 2.0, section=me7.GENERAL, group="Overrun filter",
+              unit="%", decimals=1, minimum=0,
+              tip="Drop rows with the pedal below this and the rpm above the next setting (0 = off)."),
+    ParamSpec("overrun_rpm", "Overrun: and RPM above", "float", 1200.0, section=me7.GENERAL, group="Overrun filter",
+              unit="rpm", decimals=0, minimum=0),
+    *me7.MAPS,
+    ParamSpec("knock_source", "Knock signal", "choice", "average", section=me7.GENERAL, group="Ignition knock",
               choices=(("Average of all cylinders (wkrm)", "average"), ("Worst cylinder (dwkrz per cylinder)", "worst"))),
-    ParamSpec("overrun_pedal", "Overrun filter: drop rows with pedal below (%) (0 = off)", "float", 2.0,
-              group="Overrun Filter", decimals=1, minimum=0),
-    ParamSpec("overrun_rpm", "Overrun filter: ... and RPM above", "float", 1200.0, group="Overrun Filter", minimum=0),
+    replace(me7.PRESSURE_REFERENCE[0], tip="Relative boost = pressure before the throttle - pu (pu must be logged). "
+                                           "Off: minus the ambient pressure below."),
+    *me7.PRESSURE_REFERENCE[1:],
+    *me7.KFLDRL,
+    *me7.KFVPDKSD,
+    *me7.MANIFOLD,
 ]
 
 # The ME7 set without the VVT-only KFPBRKNW. A map that is not in the WinOLS

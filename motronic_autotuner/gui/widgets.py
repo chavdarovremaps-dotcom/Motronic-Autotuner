@@ -6,8 +6,8 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractScrollArea, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHeaderView, QLabel, QSpinBox,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractScrollArea, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox, QHeaderView, QLabel,
+    QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ..families.base import ParamSpec
@@ -89,32 +89,101 @@ class CurveEditor(QTableWidget):
 
 
 class ParamForm(QWidget):
-    """Builds grouped input fields from a list of ParamSpec and reads them back as a dict."""
+    """Input fields from a list of ParamSpec, read back as a dict.
+
+    Each group is a box. A family that names sections gets one tab per
+    section; every page scrolls on its own, so the form brings its own
+    scrolling. Labels line up across the boxes of a page, numbers sit in
+    fields of one width with their unit after the value, the long
+    explanation is the tooltip, and a field with ``enabled_when`` greys out
+    while the setting it depends on says it is not used.
+    """
+
+    NUMBER_WIDTH = 130
 
     def __init__(self, specs: list[ParamSpec], parent=None):
         super().__init__(parent)
         self._widgets: dict[str, tuple[ParamSpec, QWidget]] = {}
+        self._labels: dict[str, QLabel] = {}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        forms: dict[str, QFormLayout] = {}
+        self.tabs = QTabWidget() if any(spec.section for spec in specs) else None
+        if self.tabs is not None:
+            outer.addWidget(self.tabs)
+        pages: dict[str, QVBoxLayout] = {}
+        page_labels: dict[str, list[QLabel]] = {}
+        forms: dict[tuple[str, str], QFormLayout] = {}
         for spec in specs:
-            form = forms.get(spec.group)
+            section = spec.section or "Settings"
+            if section not in pages:
+                pages[section] = self._page(section, outer)
+                page_labels[section] = []
+            form = forms.get((section, spec.group))
             if form is None:
-                box = QGroupBox(spec.group)
+                box = QGroupBox(spec.group.replace("&", "&&"))
                 form = QFormLayout(box)
-                forms[spec.group] = form
-                outer.addWidget(box)
+                form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                forms[(section, spec.group)] = form
+                pages[section].addWidget(box)
             widget = self._make(spec)
+            label = QLabel(spec.label)
+            if spec.tip:
+                label.setToolTip(spec.tip)
+                widget.setToolTip(spec.tip)
             if spec.kind == "curve":
-                form.addRow(QLabel(spec.label))
+                label.setWordWrap(True)
+                form.addRow(label)
                 form.addRow(widget)
             else:
-                form.addRow(spec.label, widget)
+                form.addRow(label, widget)
+                page_labels[section].append(label)
             self._widgets[spec.key] = (spec, widget)
-        outer.addStretch(1)
+            self._labels[spec.key] = label
+        for section, layout in pages.items():
+            layout.addStretch(1)
+            labels = page_labels[section]
+            if labels:
+                width = max(lbl.sizeHint().width() for lbl in labels)
+                for lbl in labels:
+                    lbl.setMinimumWidth(width)
+        for spec, _widget in self._widgets.values():
+            if spec.enabled_when and spec.enabled_when[0] in self._widgets:
+                self._watch(self._widgets[spec.enabled_when[0]][1])
+        self._refresh()
 
-    @staticmethod
-    def _make(spec: ParamSpec) -> QWidget:
+    def _page(self, section: str, outer: QVBoxLayout) -> QVBoxLayout:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(page)
+        if self.tabs is not None:
+            self.tabs.addTab(scroll, section.replace("&", "&&"))
+        else:
+            outer.addWidget(scroll)
+        return layout
+
+    def _watch(self, w: QWidget) -> None:
+        if isinstance(w, QCheckBox):
+            w.toggled.connect(self._refresh)
+        elif isinstance(w, QComboBox):
+            w.currentIndexChanged.connect(self._refresh)
+        elif isinstance(w, (QSpinBox, QDoubleSpinBox)):
+            w.valueChanged.connect(self._refresh)
+
+    def _refresh(self, *_args) -> None:
+        for key, (spec, widget) in self._widgets.items():
+            if not spec.enabled_when or spec.enabled_when[0] not in self._widgets:
+                continue
+            source, wanted = spec.enabled_when
+            value = self.value(source)
+            on = value in wanted if isinstance(wanted, tuple) else value == wanted
+            widget.setEnabled(on)
+            self._labels[key].setEnabled(on)
+
+    @classmethod
+    def _make(cls, spec: ParamSpec) -> QWidget:
         if spec.kind == "bool":
             w = QCheckBox()
             w.setChecked(bool(spec.default))
@@ -123,12 +192,18 @@ class ParamForm(QWidget):
             w = QSpinBox()
             w.setRange(int(max(spec.minimum, -2_000_000_000)), int(min(spec.maximum, 2_000_000_000)))
             w.setValue(int(spec.default))
+            if spec.unit:
+                w.setSuffix(f" {spec.unit}")
+            w.setFixedWidth(cls.NUMBER_WIDTH)
             return w
         if spec.kind == "float":
             w = QDoubleSpinBox()
             w.setDecimals(spec.decimals)
             w.setRange(spec.minimum, spec.maximum)
             w.setValue(float(spec.default))
+            if spec.unit:
+                w.setSuffix(f" {spec.unit}")
+            w.setFixedWidth(cls.NUMBER_WIDTH)
             return w
         if spec.kind == "choice":
             w = QComboBox()
@@ -176,3 +251,4 @@ class ParamForm(QWidget):
                         w.setCurrentIndex(idx)
             except (TypeError, ValueError, KeyError):
                 continue
+        self._refresh()
