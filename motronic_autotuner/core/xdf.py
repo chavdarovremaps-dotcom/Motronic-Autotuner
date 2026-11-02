@@ -5,6 +5,8 @@ axes are either literal LABELs or linked (``embedinfo type="3"``) to another
 table whose z data holds the axis values, EMBEDDEDDATA with 8, 16 or 32 bit
 elements, signed or unsigned, either byte order, and MATH equations of the
 form ``a*X+b`` (any arithmetic in X, evaluated with a tiny safe evaluator).
+XDFCONSTANT entries are read too, and values can be written back into a
+binary through any linear equation.
 """
 
 from __future__ import annotations
@@ -119,6 +121,12 @@ class Xdf:
             t = self._parse_table(el)
             self.tables[t.title] = t
             self.by_uid[t.uid.lower()] = t
+        self.constants: dict[str, Table] = {}
+        """XDFCONSTANT entries as one-cell tables (z axis only)."""
+        for el in root.iter("XDFCONSTANT"):
+            c = self._parse_constant(el)
+            if c is not None:
+                self.constants[c.title] = c
 
     # ---- parsing ------------------------------------------------------------
 
@@ -140,25 +148,41 @@ class Xdf:
                 axis.link_id = link.get("linkobjid").lower()
             emb = ax.find("EMBEDDEDDATA")
             math = ax.find("MATH")
-            equation = math.get("equation", "X") if math is not None else "X"
             if emb is not None:
-                flags = int(emb.get("mmedtypeflags", "0x0"), 16)
-                addr = emb.get("mmedaddress")
-                axis.embedded = Embedded(
-                    address=int(addr, 16) if addr else None,
-                    element_bits=int(emb.get("mmedelementsizebits", str(self.default_bits))),
-                    rows=int(emb.get("mmedrowcount", "1") or 1),
-                    cols=int(emb.get("mmedcolcount", "1") or 1),
-                    signed=bool(flags & FLAG_SIGNED) or (flags == 0 and self.default_signed),
-                    lsb_first=bool(flags & FLAG_LSB_FIRST) if flags else self.default_lsb_first,
-                    equation=equation,
-                    column_major=bool(flags & FLAG_COLUMN_MAJOR),
-                    is_float=bool(flags & FLAG_FLOAT),
-                )
+                axis.embedded = self._embedded(emb, math.get("equation", "X") if math is not None else "X")
             t.axes[axis.id] = axis
         return t
 
+    def _parse_constant(self, el: ET.Element) -> Table | None:
+        emb = el.find("EMBEDDEDDATA")
+        if emb is None or not emb.get("mmedaddress"):
+            return None
+        math = el.find("MATH")
+        axis = Axis(id="z", count=1, units=_text(el, "units"))
+        axis.embedded = self._embedded(emb, math.get("equation", "X") if math is not None else "X")
+        return Table(uid=el.get("uniqueid", "0x0"), title=_text(el, "title"), description=_text(el, "description"),
+                     axes={"z": axis})
+
+    def _embedded(self, emb: ET.Element, equation: str) -> Embedded:
+        flags = int(emb.get("mmedtypeflags", "0x0"), 16)
+        addr = emb.get("mmedaddress")
+        return Embedded(
+            address=int(addr, 16) if addr else None,
+            element_bits=int(emb.get("mmedelementsizebits", str(self.default_bits))),
+            rows=int(emb.get("mmedrowcount", "1") or 1),
+            cols=int(emb.get("mmedcolcount", "1") or 1),
+            signed=bool(flags & FLAG_SIGNED) or (flags == 0 and self.default_signed),
+            lsb_first=bool(flags & FLAG_LSB_FIRST) if flags else self.default_lsb_first,
+            equation=equation,
+            column_major=bool(flags & FLAG_COLUMN_MAJOR),
+            is_float=bool(flags & FLAG_FLOAT),
+        )
+
     # ---- reading ------------------------------------------------------------
+
+    def lookup(self, title: str) -> Table | None:
+        """A table or a constant by its exact title."""
+        return self.tables.get(title) or self.constants.get(title)
 
     def find(self, pattern: str) -> list[Table]:
         rx = re.compile(pattern, re.I)
@@ -167,22 +191,58 @@ class Xdf:
     def _file_offset(self, address: int) -> int:
         return address - self.base_offset if self.base_subtract else address + self.base_offset
 
+    @staticmethod
+    def _dtype(emb: Embedded) -> str:
+        order = "<" if emb.lsb_first else ">"
+        if emb.is_float:
+            return order + {32: "f4", 64: "f8"}[emb.element_bits]
+        return {8: "i1" if emb.signed else "u1", 16: order + ("i2" if emb.signed else "u2"),
+                32: order + ("i4" if emb.signed else "u4")}[emb.element_bits]
+
+    def span(self, emb: Embedded) -> tuple[int, int]:
+        """File offset and length in bytes of the data."""
+        if emb.address is None:
+            raise ValueError("axis has no address")
+        return self._file_offset(emb.address), emb.rows * emb.cols * emb.element_bits // 8
+
     def read_raw(self, data: bytes, emb: Embedded) -> np.ndarray:
         if emb.address is None:
             raise ValueError("axis has no address")
         n = emb.rows * emb.cols
-        order = "<" if emb.lsb_first else ">"
-        if emb.is_float:
-            dtype = order + {32: "f4", 64: "f8"}[emb.element_bits]
-        else:
-            dtype = {8: "i1" if emb.signed else "u1", 16: order + ("i2" if emb.signed else "u2"),
-                     32: order + ("i4" if emb.signed else "u4")}[emb.element_bits]
+        dtype = self._dtype(emb)
         offset = self._file_offset(emb.address)
         raw = np.frombuffer(data, dtype=dtype, count=n, offset=offset).astype(float)
         values = evaluate(emb.equation, raw)
         if emb.column_major:
             return values.reshape(emb.cols, emb.rows).T.copy()
         return values.reshape(emb.rows, emb.cols)
+
+    def encode(self, emb: Embedded, values) -> np.ndarray:
+        """The stored numbers for physical ``values`` ``[rows, cols]``, rounded to the
+        nearest step. ValueError when the equation is not linear or a value does not fit."""
+        a, b = linear_coefficients(emb.equation)
+        raw = (np.asarray(values, dtype=float) - b) / a
+        if emb.is_float:
+            return raw
+        raw = np.round(raw)
+        top = 2 ** (emb.element_bits - 1 if emb.signed else emb.element_bits)
+        lo, hi = (-top, top - 1) if emb.signed else (0, top - 1)
+        bad = ~np.isfinite(raw) | (raw < lo) | (raw > hi)
+        if bad.any():
+            ends = sorted((lo * a + b, hi * a + b))
+            raise ValueError(f"{int(bad.sum())} value(s) outside the storable range {ends[0]:g} to {ends[1]:g}")
+        return raw
+
+    def write_raw(self, buf: bytearray, emb: Embedded, values) -> None:
+        """Write physical ``values`` (``rows x cols`` cells) into ``buf`` in the stored layout."""
+        values = np.asarray(values, dtype=float).reshape(emb.rows, emb.cols)
+        raw = self.encode(emb, values)
+        ordered = raw.T.ravel() if emb.column_major else raw.ravel()
+        blob = ordered.astype(self._dtype(emb)).tobytes()
+        offset, size = self.span(emb)
+        if offset < 0 or offset + size > len(buf):
+            raise ValueError(f"address {emb.address:#x} lies outside the binary")
+        buf[offset:offset + size] = blob
 
     def read_axis(self, data: bytes, axis: Axis) -> np.ndarray:
         if axis.link_id:
@@ -209,6 +269,16 @@ class Xdf:
             y_units=t.axes["y"].units if "y" in t.axes else "",
             z_units=t.axes["z"].units if "z" in t.axes else "",
         )
+
+
+def linear_coefficients(equation: str) -> tuple[float, float]:
+    """``(a, b)`` of an equation ``a*X+b``; ValueError when it is not linear in X."""
+    x = np.array([0.0, 1.0, 2.0, 1000.0])
+    y = np.broadcast_to(evaluate(equation, x), x.shape).astype(float)
+    a, b = float(y[1] - y[0]), float(y[0])
+    if a == 0 or not np.allclose(y, a * x + b, rtol=1e-9, atol=1e-9):
+        raise ValueError(f"equation {equation!r} is not linear in X, so values cannot be written")
+    return a, b
 
 
 def load_bin(path: str | Path) -> bytes:

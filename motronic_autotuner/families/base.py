@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,14 +23,18 @@ class ParamSpec:
 
     key: str
     label: str
-    kind: str  # "bool" | "int" | "float" | "choice"
+    kind: str  # "bool" | "int" | "float" | "choice" | "curve"
     default: Any
+    """For ``kind == "curve"``: ``{"x": [breakpoints], "y": [values]}``, edited as a two-row table."""
     group: str = "General"
     choices: tuple[tuple[str, Any], ...] = ()
     """For ``kind == "choice"``: (label, value) pairs."""
     decimals: int = 2
     minimum: float = -1e9
     maximum: float = 1e9
+    x_label: str = ""
+    y_label: str = ""
+    """For ``kind == "curve"``: the row labels of the breakpoints and of the values."""
 
 
 @dataclass(frozen=True)
@@ -189,7 +194,7 @@ class Family:
         p = Preset(family=self.key)
         p.vars = dict(self.default_vars)
         p.prep = dict(self.default_prep)
-        p.params = {spec.key: spec.default for spec in self.params}
+        p.params = {spec.key: copy.deepcopy(spec.default) for spec in self.params}
         p.files = {
             "raw_log_folder": "",
             "filename_wot": "ME_Logs_WOT.csv",
@@ -207,7 +212,7 @@ class Family:
         for k, v in self.default_vars.items():
             preset.vars.setdefault(k, v)
         for spec in self.params:
-            preset.params.setdefault(spec.key, spec.default)
+            preset.params.setdefault(spec.key, copy.deepcopy(spec.default))
         for k, v in self.default_prep.items():
             preset.prep.setdefault(k, v)
         if not preset.log_source and self.log_sources:
