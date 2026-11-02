@@ -208,10 +208,95 @@ reference bin those tables are unprogrammed filler.
       filled cell of each row), since cell-to-cell KFLDRL slopes from forced
       duties are a staircase (risers ~12, treads ~1 %/100 hPa). I and D stay
       manual.
-- [ ] Siemens MS43 turbo (BMW M54B30 with a turbo, MS4X firmware): new
-      calibration scripts, to be started in a new session. Build on the
-      existing Siemens MS43 family (XDF + bin import, TunerPro logs, VE,
-      knock, VANOS check), as a turbo variant or a new family.
+- [ ] Siemens MS43X turbo (BMW M54B30 with a turbo, MS43X custom firmware,
+      speed density): built from the ground up in `motronic_autotuner/ms43_turbo/`,
+      app `apps/ms43_turbo`, `run_ms43_turbo.bat` (2026-10-29). Almost nothing
+      in this plan applies to it: not the Siemens MS43 family and not the
+      conventions above. It uses the three-tab window. Kept: the TunerPro log
+      reader and the 4-cell splat. Every further step comes from the user.
+      Data: `C:/Users/chavd/OneDrive/Desktop/_Files/bmw e36 m54b30 turbo/` (bins incl. the readback,
+      the logging ADX, `csv logs\log2.csv`, `log3.csv`); XDF
+      `D:\Repos\BMW-XDFs\MS43\Siemens_MS43_MS43X001_512K.xdf`.
+      Built: VE correction of ip_map_ve_1..8 (VE fraction, MAP kPa rows, rpm
+      columns). "Wideband present" tick on the ingestion tab: f = Wideband AFR
+      / AFR target + (STFT + LTFT mult) / 100 on all rows outside fuel cut,
+      else f = 1 + trims / 100 on closed-loop rows; bank 1 trims or both
+      banks averaged; VEnew = VEold x f. Rows count towards the blended tables
+      by the fraction in "Active VE Table". Fuel-cut rows and 1 s after each
+      cut, and rows with the wideband input at 0 or 5 V, are left out.
+      Facts from the logs: load = 5.75 x VE x MAP (correlation 0.9998), so
+      higher VE = more fuel; Wideband AFR = 9.40 + 1.894 x V (rear O2 input
+      bank 1); "Wideband Lambda" logs 0 throughout; the wideband reads lean
+      0.36 to 0.53 s after a fuel cut starts; no closed-loop rows yet, only
+      table 1 active. The wideband term is measured / target (lean raises
+      VE, same sign as the trims); the user confirmed this on 2026-10-29.
+      ip_maf_1_diag__n__tps_av (MAF substitute, rpm rows by throttle body
+      position 0..70 deg columns, mg/stk): the logged Engine Load Injection
+      times the same row factor as the VE correction, splatted on the table
+      grid; cells without data keep the factory value (an NA table, about
+      1.5 x lower than the logged cells, so the new table has steps where
+      logged and factory cells meet). Goes on the Load sheet.
+      In the firmware this table's airflow goes through the intake manifold
+      model to an estimated manifold pressure, and the load comes from that
+      pressure. Best would be post-tune load data for every cell; the user
+      tests the current table on the car first and decides from that.
+      Ignition (ip_iga_ron98_pl__n__maf, 20 rpm rows by 16 load columns,
+      Engine Load Ignition, 0.375 deg steps): rows with Part Load or Full
+      Load on (never idle or fuel cut there). Knock Correction Average
+      (logged negative) splatted as a magnitude; cells at or above 0.1 deg
+      pull the average rounded up to whole steps (the old MS43 algorithm);
+      cells with no retard at all and at least 5 samples get +0.7 deg (lands
+      as +0.75 once pasted); slivers under 0.1 deg and thin cells unchanged.
+      On log2 + log3: 0 cells pulled, 48 advanced. The six-cylinder average
+      dilutes single-cylinder knock (cylinder 5 retarded 3 deg, average
+      0.5): the worst cylinder would pull 0.375 in 5 of the 12 cells that
+      saw knock. The user chose to keep the average (2026-10-29).
+      Patches tab (2026-10-29): fixed patches written into the bin through
+      the XDF, saved under a new name (the input bin is never overwritten).
+      A patch is the MS4X wiki copy-paste text (name line, then value rows as
+      TunerPro shows them) in `ms43_turbo/patches.py`; a wiki name without
+      the XDF axis suffix matches the one title starting with name + "__".
+      Nothing is written unless every object is found, has the patch's shape
+      and every value fits; then each object is read back, the monitor sum
+      (0x72FFC) is recalculated and the calibration CRC kept equal to the
+      input bin's through the padding bytes at 0x72FF8 (checksum.py, ported
+      from BMW-XDFs/ms43_checksum.py); bytes outside the calibration CRC
+      segments are refused. core/xdf.py now reads XDFCONSTANT and writes
+      values through linear equations. First patch: ICV delete (M54B30
+      values, 19 objects); on the car's readback bin 17 change, 796 bytes,
+      checked with the BMW-XDFs reader and checksum script.
+      Warm-up (2026-10-31): fits ip_ti_tco_wup_ron98__tco__tco_st and its
+      idle twin (coolant now by coolant at start) with the base
+      ip_ti_wup_ron98__n__maf fixed. The ECU applies 1 + base x fade
+      (checked on logs after v4/warmup.csv: injection time over the hot line
+      gave +3.6 % at idle, base x fade +3.6 %; ip_ti_vo_wup does not scale
+      the whole injection time). Target lambda from the calibrator's own
+      table setting, coolant by lambda (a "curve" setting edited as a
+      two-row table on the ingestion tab, saved in the profile; default 0.90
+      at 0 C to 1.00 at 60 C), linear between points, held beyond the ends,
+      times the logged AFR target; the table used heads the Warm-up sheet.
+      Cold rows
+      (coolant under the warm-engine threshold, default 80 C) feed only the
+      warm-up; VE, ip_maf_1_diag and ignition use only warm rows. Each cold
+      row's base-fueling error is the warm rows' VE correction at its VE
+      cell; rows without warm data are skipped (default) or taken as VE
+      right. Steady filter on rpm and load rates. Coolant at start from the
+      Engine Start flag, else the file's first coolant. After-start tables
+      (sawup) not done: no log with the start yet. On warmup.csv (35 to 43
+      C, no warm rows): lambda 0.73 against 0.97, so the wanted fade is
+      negative; the richness is base fueling (v3/v4 c_inj_flow 557, was
+      680; VE tables 3 to 6 active cold, never tuned warm).
+      Car diagnosis (2026-11-02): the knock retard on all six cylinders at
+      once (-3 deg per firing up to the limit, also under vacuum, only while
+      load is above ip_maf_min_knk__n__tco) appeared only after the Engine
+      Malfunction Light. That was DTC 211, INPA "LLFS Fehler in der
+      Mechanik": the idle valve's mechanical fault (mec_isa, P1500/P1501),
+      set in light cruise, where the valve carries most of the air (throttle
+      0 to 5 %, ISA 60 to 95 %). The ICV delete patch applied to "v6, with
+      lambda open loop always, dtc fix (2)", saved as "BMW v7 ICV delete
+      (from v6 dtc fix 2).bin", stopped the retard on the car (user). Not
+      settled: after clearing the DTCs, the old records (same data words)
+      came back after a key cycle.
 
 - [ ] Boost stage 2 and 3 as above (stage 3 only if targets rise).
 - [ ] Which timing map is active: the logged "Timing Cyl. 1" minus its
