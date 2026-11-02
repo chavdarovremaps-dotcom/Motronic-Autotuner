@@ -131,7 +131,7 @@ def test_family_run_all_with_missing_axes_reports_skips():
     keys = [m.key for m in result.maps]
     assert keys == ["kfldimx", "kfldrl", "abs_wgdc"]
     skipped = [r for r in result.rows if r.status.startswith("Skipped")]
-    assert len(skipped) == 6
+    assert len(skipped) == 7
     assert all("Missing axes" in r.status or "Missing base maps" in r.status for r in skipped)
     # with axes present but no warmup rows, the subset check reports instead
     preset.axes.update({"rpm_kffwlw": AXIS_RPM, "load_kffwlw": np.array([10.0, 100.0]), "tmot": np.array([0.0, 80.0])})

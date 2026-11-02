@@ -11,6 +11,7 @@ from ..generators import axis_block, column
 from ..generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
 from ..generators.boost_pid import MIN_DUTY_STEP, MIN_LEVEL_SAMPLES, generate_pid_maps
 from ..generators.fuel import generate_fkkvs
+from ..generators.maf_check import DEFAULT_MIN_THROTTLE, DEFAULT_VE, DISPLACEMENT_1_8T, generate_maf_check
 from ..generators.handover import generate_handover_maps
 from ..generators.ignition import generate_kfzw
 from ..generators.manifold import generate_manifold_maps, generate_pbrk_maps
@@ -31,6 +32,8 @@ DEFAULT_VARS = {
     "tmot": "tmotlin",
     "pu": "pu",
     "knock": "wkrm",
+    "maf": "ml_w",
+    "iat": "tanslin",
     "time": "TimeStamp",
 }
 
@@ -48,6 +51,8 @@ VAR_LABELS = {
     "tmot": "Coolant temp",
     "pu": "Ambient pressure",
     "knock": "Knock retard",
+    "maf": "Corrected airflow (ml_w; g/s, kg/h converted)",
+    "iat": "Charge air temperature (tanslin)",
     "time": "Time",
 }
 
@@ -79,6 +84,12 @@ PARAMS = [
               group="Boost PID", minimum=0.5, maximum=50),
     ParamSpec("ldr_min_file_duty", "Duty ratio: use KFLDRL cells where the file's duty is at least (%)", "float", 20.0,
               group="Boost PID", minimum=0, maximum=100),
+    ParamSpec("maf_ve", "Reference volumetric efficiency (%)", "float", DEFAULT_VE, group="MAF Check",
+              minimum=10, maximum=150),
+    ParamSpec("maf_displacement", "Engine displacement (cc)", "float", DISPLACEMENT_1_8T, group="MAF Check",
+              minimum=100, maximum=10000),
+    ParamSpec("maf_min_throttle", "Use rows with the throttle at least (%)", "float", DEFAULT_MIN_THROTTLE,
+              group="MAF Check", minimum=0, maximum=100),
     ParamSpec("min_samples", "Min samples per cell", "int", 1, group="General Math & Fuel Settings", minimum=0),
     ParamSpec("trim_format", "Fuel trim format", "choice", "lambda", group="General Math & Fuel Settings",
               choices=(("Lambda (factor, e.g. 1.05)", "lambda"), ("Percent (e.g. 5)", "percent"))),
@@ -104,6 +115,7 @@ TARGET_MAPS = [
     TargetMap("KFLDRQ2", "rpm_kfldrq2", "x_kfldrq2", "base_kfldrq2", "Boost PID"),
     TargetMap("LDRQ1ST", "row_ldrq1st", "rpm_ldrq1st", "base_ldrq1st", "Boost PID"),
     TargetMap("FKKVS", "rpm_fuel", "te", "base_fkkvs", "Fueling"),
+    TargetMap("KFKHFM", "rpm_kfkhfm", "load_kfkhfm", "base_kfkhfm", "MAF Check"),
     TargetMap("KFFWLW", "rpm_kffwlw", "load_kffwlw", "base_kffwlw", "Warmup Enrichment"),
     TargetMap("KFFWL", "tmot", "kffwl_trim", "base_kffwl", "Warmup Enrichment"),
     TargetMap("KFZW", "rpm_ign", "load_ign", "base_kfzw", "Ignition Timing"),
@@ -278,6 +290,29 @@ def _manifold(ctx: RunContext):
     return _on_sheet(maps, "Airflow")
 
 
+def _maf_check(ctx: RunContext):
+    """ml_w against the airflow at the reference VE, on the KFKHFM grid. Information only."""
+    p = ctx.preset
+    return _on_sheet(generate_maf_check(
+        ctx.logs.full, p.vars, axis_rpm=p.axis("rpm_kfkhfm"), axis_load=p.axis("load_kfkhfm"),
+        base_map=p.base_map("base_kfkhfm"), displacement_cc=float(ctx.p("maf_displacement", DISPLACEMENT_1_8T)),
+        ve_pct=float(ctx.p("maf_ve", DEFAULT_VE)), min_throttle=float(ctx.p("maf_min_throttle", DEFAULT_MIN_THROTTLE)),
+        min_samples=float(ctx.p("min_samples", 1)), messages=ctx.messages,
+    ), "Airflow")
+
+
+def airflow_to_grams(df, preset, messages):
+    """Ingest hook: an airflow logged in kg/h (the logger's units row says so) becomes g/s."""
+    col = preset.var("maf")
+    if not col or col not in df.columns:
+        return df
+    unit = str(df.attrs.get("units", {}).get(col, "")).lower().replace(" ", "")
+    if unit in ("kg/h", "kg/hr", "kgh"):
+        df[col] = df[col] / 3.6
+        messages.append(f"  -> {col} logged in kg/h, converted to g/s.")
+    return df
+
+
 def _apply_5120_scaling(ctx: RunContext, result: RunResult) -> None:
     """With the 5120 hack on, logged pressures were doubled: KFURL doubles and KFPRG halves."""
     if not ctx.preset.prep.get("hack_5120", False):
@@ -302,6 +337,8 @@ GENERATORS = [
     GeneratorSpec("fuel", "Fuel Trim (FKKVS)", ("hot",), ("rpm_fuel", "te"), _fuel),
     GeneratorSpec("ignition", "Ignition Timing (KFZW)", ("full",), ("rpm_ign", "load_ign"), _ignition),
     GeneratorSpec("manifold", "Intake Manifold Model (KFURL / KFPRG / KFPBRK)", ("full",), ("rpm_url",), _manifold),
+    GeneratorSpec("maf", "MAF Check (ml_w vs reference VE, KFKHFM axes, information only)", ("full",),
+                  ("rpm_kfkhfm", "load_kfkhfm"), _maf_check),
 ]
 
 BOSCH_ME7 = Family(
@@ -311,7 +348,7 @@ BOSCH_ME7 = Family(
     var_labels=VAR_LABELS,
     params=PARAMS,
     target_maps=TARGET_MAPS,
-    log_sources=[LogSource("me7_logger", "ME7-Logger / TunerPro CSV", hooks=(hack_5120,))],
+    log_sources=[LogSource("me7_logger", "ME7-Logger / TunerPro CSV", hooks=(hack_5120, airflow_to_grams))],
     generators=GENERATORS,
     post_process=[_apply_5120_scaling],
     default_prep=DEFAULT_PREP,

@@ -69,6 +69,7 @@ def read_logger_csv(path: str | Path) -> pd.DataFrame:
     """
     path = Path(path)
     skip = header_line(path)
+    units = logger_units(path, skip)
     df = pd.read_csv(
         path,
         skiprows=skip,
@@ -88,7 +89,31 @@ def read_logger_csv(path: str | Path) -> pd.DataFrame:
     # trailing separators produce unnamed, empty columns; drop them so they
     # do not wipe every row in dropna()
     unnamed = [c for c in df.columns if c.startswith("Unnamed:") and df[c].isna().all()]
-    return df.drop(columns=unnamed)
+    out = df.drop(columns=unnamed)
+    out.attrs["units"] = units
+    return out
+
+
+TIME_UNITS = ("sec.ms", "s", "sec", "ms", "seconds")
+
+
+def logger_units(path: Path, header: int) -> dict[str, str]:
+    """Column -> unit from the row under the header, when that row is a units
+    row (ME7-Logger: it starts with the time unit, ``sec.ms``); else empty."""
+    with open(path, "r", encoding="latin-1", errors="replace") as f:
+        lines = []
+        for i, line in enumerate(f):
+            if i >= header:
+                lines.append(line.rstrip("\r\n"))
+            if len(lines) == 2:
+                break
+    if len(lines) < 2:
+        return {}
+    names = [n.strip().replace("\ufeff", "").replace("\u00ef\u00bb\u00bf", "") for n in lines[0].split(",")]
+    units = [u.strip() for u in lines[1].split(",")]
+    if not units or units[0].lower() not in TIME_UNITS:
+        return {}
+    return {n: u for n, u in zip(names, units) if n}
 
 
 PREAMBLE_LIMIT = 200

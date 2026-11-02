@@ -71,6 +71,18 @@ family means one `TargetMap` line and one generator wrapper.
   valve receives, is the duty source for KFLDRL and is quantised, while
   ldtv (the PID output) sits at 95 % and means nothing in such logs.
   Never use the duty as a condition for anything (spool, steady state).
+- MAF check (ME7, 2026-11-02), information only: ml_w against the airflow
+  at a reference VE (90 %, parameter) from pvdks_w (not ps_w, which is the
+  ECU's MAF-based model), tanslin (after the intercooler on the 1.8T) and
+  the displacement (1781 cc), ideal gas law, rows with wdkba >= 95 %, rows
+  with the pressure or airflow at a sensor ceiling left out. Error and
+  implied VE are averaged on the KFKHFM grid (nmot by rl_w, the ECU's own
+  lookup); a "KFKHFM x expected / measured" block is shown for information
+  only, since KFKHFM changes the load and everything after it. The
+  ME7-Logger units row is kept (df.attrs["units"]); ml_w in kg/h is
+  converted to g/s at ingest. The user's Excel sheet for this had a
+  missing bracket (density not interpolated), divided by Patm and used
+  1000 hPa for a 1013 hPa density table.
 - Boost PID (ME7, 2026-10-29). KFLDRQ0 / Q1 / Q2 and the curve LDRQ1ST
   share one ROM rpm axis; all four go onto the KFLDRL rpm axis (the auto
   spool axis when ticked), Q1 / Q2 / LDRQ1ST keeping their values at the
