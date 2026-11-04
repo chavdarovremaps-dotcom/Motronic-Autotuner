@@ -240,8 +240,9 @@ ME7.6.2 damos (2026-11-04):
   confirmed.
 - KFLDRAPP is rpm by pedal (wped), 8 x 8, with LDRAPP = 0, so forced-duty
   logging works as on ME7.
-- KFKHFM exists (14 x 14, rpm by rl). The damos has no charge-air
-  temperature: CLATA names only TANS, so the MAF check stays out.
+- KFKHFM exists (14 x 14, rpm by rl), and the MAF check runs on it.
+  tans is the charge temperature: it comes from the boost pressure
+  sensor after the intercooler. The user checked it on the car.
 - KFVPDKSE is built (2026-11-04) by the MED9 transform, in
   `handover.generate_kfvpdkse`:
   - plgru is the boost of the WOT rows at 0 % duty (the 0 % pull plus the
@@ -290,15 +291,10 @@ ME7.6.2 damos (2026-11-04):
     1500 rpm this file holds the throttle at about 34 % at full pedal.
   - ml_w is in kg/h. The vehicle reader now keeps the units row, and
     airflow_to_grams converts the airflow.
-  - The temperature is tans as logged, the charge temperature as on ME7.
-    That is the user's call: tans drops in a pull (18.8 -> 15.0 C in
-    Log00012), and the user has seen the same on the 1.8T, a heat-soaked
-    sensor after the intercooler cooled by the charge air. The user will
-    check where it physically sits.
-  - A model for a sensor before the turbo stays as an option, off by
-    default (maf_charge_temp = model). It assumes 70 % compressor
-    efficiency, then 75 % intercooler, with pu from plgru_w - DPLPU, and
-    puts VE about 5 % higher.
+  - tans is the charge temperature, as on ME7. The sensor is in the boost
+    pressure sensor after the intercooler; the user checked on the car.
+    It drops in a pull (18.8 -> 15.0 C in Log00012): the sensor is heat
+    soaked and the charge air cools it, as on the 1.8T.
   - Result with tans: median VE 92.9 % (85.6 to 99.4 %) over 4244 rows.
     It is 86 % at 1800-2000 rpm, 92-97 % at 3000-3500, about 100 % at
     4000-4500, 94-98 % at 5000, 86 % at 6000 and 81-84 % at 6400.

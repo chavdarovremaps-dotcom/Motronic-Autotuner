@@ -44,10 +44,7 @@ from ..core.winols import TargetMap
 from ..generators import axis_block, column
 from ..generators.base_boost import ambient_per_row, generate_base_boost_maps
 from ..generators.handover import generate_kfvpdkse
-from ..generators.maf_check import (
-    COMPRESSOR_EFFICIENCY, DEFAULT_MIN_THROTTLE, DEFAULT_VE, DISPLACEMENT_2_0, INTERCOOLER_EFFICIENCY,
-    charge_temperature, generate_maf_check,
-)
+from ..generators.maf_check import DEFAULT_MIN_THROTTLE, DEFAULT_VE, DISPLACEMENT_2_0, generate_maf_check
 from . import bosch_me7 as me7
 from .base import GeneratorSpec, ParamSpec, RunContext
 from .opel_vehicle import (  # noqa: F401  (re-exported for callers and tests)
@@ -125,23 +122,10 @@ MAF = [
     replace(me7.MAF[2], label="Throttle (wdk1) at least",
             tip="Only rows with the throttle wide open: at low rpm this ECU holds the throttle part closed even "
                 "at full pedal, so the pedal does not tell."),
-    ParamSpec("maf_charge_temp", "Charge temperature", "choice", "logged", section=me7.AIRFLOW, group=MAF_GROUP,
-              choices=(("The temperature channel as logged (as on ME7)", "logged"),
-                       ("Modelled from it: compressor, then intercooler", "model")),
-              tip="As logged: the temperature channel is taken as the charge temperature after the intercooler, "
-                  "as on ME7. Modelled: only for a sensor before the turbo; the compressor heating and the "
-                  "intercooler are estimated from the boost."),
-    ParamSpec("maf_compressor_eff", "Compressor efficiency", "float", COMPRESSOR_EFFICIENCY, section=me7.AIRFLOW,
-              group=MAF_GROUP, unit="%", decimals=0, minimum=30, maximum=90, enabled_when=("maf_charge_temp", "model"),
-              tip="Adiabatic efficiency of the compression: the heat the compressor adds to the air."),
-    ParamSpec("maf_intercooler_eff", "Intercooler efficiency", "float", INTERCOOLER_EFFICIENCY, section=me7.AIRFLOW,
-              group=MAF_GROUP, unit="%", decimals=0, minimum=0, maximum=100, enabled_when=("maf_charge_temp", "model"),
-              tip="Share of the compressor's temperature rise the intercooler takes back out."),
 ]
 
 PARAMS = _params() + MAF
 PLGRU_COLUMN = "__plgru_new"
-CHARGE_COLUMN = "__t_charge"
 
 
 def _dplpu_curves(p) -> dict[str, tuple[np.ndarray, np.ndarray]]:
@@ -259,31 +243,14 @@ def _kfvpdkse(ctx: RunContext):
 
 
 def _maf_check(ctx: RunContext):
-    """ml_w against the airflow at the reference VE on the KFKHFM grid, rows
-    with the throttle (wdk1) wide open, the temperature channel taken as the
-    charge temperature as on ME7, or modelled from it when chosen.
-    Information only."""
+    """ml_w against the airflow at the reference VE on the KFKHFM grid, as on
+    ME7: tans is the charge temperature (the sensor sits in the boost
+    pressure sensor after the intercooler), rows with the throttle (wdk1)
+    wide open, 1998 cc. Information only."""
     p = ctx.preset
-    data = ctx.logs.full.copy()
     v = dict(p.vars)
     v["pedal"] = p.var("throttle") or v["pedal"]
-    if str(ctx.p("maf_charge_temp", "logged")) == "model":
-        file_curve = _dplpu_curves(p).get("DPLPU")
-        pu, from_logs = ambient_per_row(data, v, *(file_curve or (None, None)),
-                                        fallback=float(ctx.p("ambient_pressure", 1000)))
-        eff_c = float(ctx.p("maf_compressor_eff", COMPRESSOR_EFFICIENCY))
-        eff_ic = float(ctx.p("maf_intercooler_eff", INTERCOOLER_EFFICIENCY))
-        data[CHARGE_COLUMN] = charge_temperature(column(data, v["iat"]), column(data, v["boost"]), pu,
-                                                 compressor_eff=eff_c, intercooler_eff=eff_ic)
-        v["iat"] = CHARGE_COLUMN
-        wide = column(data, v["pedal"]) >= float(ctx.p("maf_min_throttle", DEFAULT_MIN_THROTTLE))
-        rise = (column(data, CHARGE_COLUMN) - column(data, p.var("iat")))[wide]
-        ctx.messages.append(
-            f"MAF check: charge temperature modelled from {p.var('iat')} as a sensor before the turbo, compressor "
-            f"{eff_c:g} %, intercooler {eff_ic:g} %, pu {np.median(pu):.0f} hPa"
-            + (" from plgru_w - DPLPU" if from_logs else " (setting)")
-            + (f"; {rise.size} wide-open rows, {np.median(rise):.0f} C above {p.var('iat')} at the median, "
-               f"{np.max(rise):.0f} C at most." if rise.size else "."))
+    data = ctx.logs.full
     return me7._on_sheet(generate_maf_check(
         data, v, axis_rpm=p.axis("rpm_kfkhfm"), axis_load=p.axis("load_kfkhfm"), base_map=p.base_map("base_kfkhfm"),
         displacement_cc=float(ctx.p("maf_displacement", DISPLACEMENT_2_0)),
