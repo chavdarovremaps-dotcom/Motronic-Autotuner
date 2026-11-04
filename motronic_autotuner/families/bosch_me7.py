@@ -353,7 +353,30 @@ def _manifold(ctx: RunContext):
             min_samples=min_samples, apply_to=str(ctx.p("pbrk_apply", "pressure")),
             messages=ctx.messages,
         )
+    _kfprg_on_its_axis(maps, p.axis("rpm_url"), p.axis("rpm_prg"), ctx.messages)
     return _on_sheet(maps, "Airflow")
+
+
+def _kfprg_on_its_axis(maps, axis_url, axis_prg, messages: list[str]) -> None:
+    """KFPRG is fitted on the KFURL rpm axis. Where the file gives KFPRG an rpm
+    axis of its own (ME7.6.2 KFPRGE: 24 points from 0 rpm against KFURLE's
+    from 700), the fitted values move onto it, linear in rpm and held at the
+    ends, so the block pastes as it stands."""
+    kfprg = next((m for m in maps if m.key == "kfprg"), None)
+    if kfprg is None or axis_url is None or axis_prg is None:
+        return
+    axis_url, axis_prg = np.asarray(axis_url, dtype=float), np.asarray(axis_prg, dtype=float)
+    if np.array_equal(axis_url, axis_prg):
+        return
+    values = np.asarray(kfprg.values, dtype=float)
+    moved = np.full((axis_prg.size, values.shape[1]), np.nan)
+    for c in range(values.shape[1]):
+        ok = np.isfinite(values[:, c])
+        if ok.any():
+            moved[:, c] = np.interp(axis_prg, axis_url[ok], values[ok, c])
+    kfprg.values, kfprg.y_axis, kfprg.counts = moved, axis_prg, None
+    messages.append(f"  KFPRG moved from the KFURL rpm axis ({axis_url.size} points) onto its own "
+                    f"({axis_prg.size} points, {axis_prg[0]:g} to {axis_prg[-1]:g} rpm), held flat past the fitted range.")
 
 
 def _maf_check(ctx: RunContext):

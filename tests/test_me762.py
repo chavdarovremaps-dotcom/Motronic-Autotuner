@@ -105,3 +105,20 @@ def test_boost_pid_moves_onto_the_kfldrl_axis(tmp_path):
     q0 = res.map("kfldrq0_corrected")
     assert q0 is not None and list(q0.y_axis) == list(RPM_AXIS)
     assert any(m.startswith("Boost PID:") for m in res.messages)
+
+
+def test_damos_names_and_kfprg_on_its_own_axis(tmp_path):
+    from motronic_autotuner.families.bosch_me155 import BOSCH_ME155
+    names = [t.winols_name for t in BOSCH_ME762.target_maps]
+    assert "KFURLE" in names and "KFPRGE" in names
+    assert not {"KFURL", "KFPRG", "KFPBRK", "KFVPDKSD"} & set(names)
+    assert "KFURL" in [t.winols_name for t in BOSCH_ME155.target_maps]   # ME1.5.5 keeps the ME7 names
+
+    write_vehicle_log(tmp_path / "Log00001.csv")
+    p = make_preset()
+    p.axes["rpm_url"] = np.array([700, 1500, 3000, 4500, 6000.0])
+    p.axes["rpm_prg"] = np.array([0, 350, 700, 1000, 2000, 4000, 6300.0])
+    res = BOSCH_ME762.run_all(p, BOSCH_ME762.ingest(tmp_path, p))
+    kfprg = res.map("kfprg")
+    assert kfprg is not None and list(kfprg.y_axis) == list(p.axes["rpm_prg"])
+    assert any("KFPRG moved" in m for m in res.messages)

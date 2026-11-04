@@ -206,8 +206,9 @@ VEHICLE_LOGS = LogSource(
 
 
 def opel_vehicle_family(*, key: str, display_name: str, excel_default_name: str,
-                        knock_cylinders: tuple[str, ...]) -> Family:
-    """Build one Opel family: the shared declaration plus its per-cylinder knock channel names."""
+                        knock_cylinders: tuple[str, ...], target_maps: list[TargetMap] | None = None) -> Family:
+    """Build one Opel family: the shared declaration plus its per-cylinder knock channel names
+    and, once its damos is known, its own map names (default: the ME7 names)."""
     default_vars = dict(DEFAULT_VARS)
     labels = dict(VAR_LABELS)
     for i, name in enumerate(knock_cylinders, start=1):
@@ -222,7 +223,7 @@ def opel_vehicle_family(*, key: str, display_name: str, excel_default_name: str,
         default_vars=default_vars,
         var_labels=labels,
         params=PARAMS,
-        target_maps=list(TARGET_MAPS),
+        target_maps=list(TARGET_MAPS if target_maps is None else target_maps),
         log_sources=[VEHICLE_LOGS],
         generators=GENERATORS,
         post_process=[me7._apply_5120_scaling],

@@ -47,6 +47,16 @@ family means one `TargetMap` line and one generator wrapper.
   rpm holds rpm values; ``Columns`` / ``Rows`` do not describe the value
   order. Profiles saved before 2026-10-29 hold scrambled or transposed
   KFURL / KFPRG / KFVPDKSD base maps: re-import the export.
+- WinOLS import, 2026-11-04: an axis the export names or units as rpm
+  (Motordrehzahl, U/min, Upm, 1/min) counts as rpm from 0 rpm upwards. The
+  300 rpm floor holds only for unnamed axes. Before this, the ME7.6.2
+  KFPRGE and KFVPDKSE (rpm from 0) were read in the wrong value order, and
+  "Upm" was not known as a unit. That also fixes inverted maps with an
+  Upm axis in the 032BJ and 362287 exports: KFKHFM and KFFWLW were read
+  down the y list. The 032BJ "KFKHFM x expected / measured" block from
+  2026-11-02 used the scrambled KFKHFM; its error and VE tables did not.
+  The reference exports in Scripts/ExportsFromWinols read exactly as
+  before.
 - WinOLS import keeps rpm on the rows of every map whose y axis key says
   rpm. The rpm axis is recognised from its values (increasing, 300 to at
   least 2000) and only in doubt from the export's AxisX / AxisY name and
@@ -206,6 +216,37 @@ Not ported yet:
 - ml_w is in kg/h. The vehicle reader does not keep the units row yet
   (its row under the header is the German descriptions).
 - pu is still not logged.
+
+ME7.6.2 damos (2026-11-04):
+- Exports:
+  - `...\astra h 2.0 hybrid\damos\WinOLS(Opel Astra-H (Original) 371226
+    ...).bin.csv` is the damos file, 3507 maps.
+  - The car's own file carries the ported names:
+    `...\astra h 2.0 hybrid\WinOLS(Opel (Original|more fuel) 378796 ...).bin.csv`.
+- The ME7.6.2 family has its own target list (`bosch_me762.TARGET_MAPS`).
+- KFURL and KFPRG are KFURLE and KFPRGE: rpm by cam overlap 0 / 90, equal
+  columns, each on its own 24-point rpm axis. The fitted KFPRG is moved
+  onto the KFPRG axis whenever it differs from the KFURL one.
+- KFPBRK is KFPBRKLM: throttle angle by rpm, all 1.0 on a default axis.
+  It is not imported, since ps_w is modelled on this ECU.
+- KFVPDKSD does not exist. The 1.8T has both KFVPDKSD (dynamic) and
+  KFVPDKSE (steady state); ME7.6.2 has only KFVPDKSE.
+  - Its x axis is (ps - plgru) / (plsolmax - plgru): damos 0.3 / 0.5 / 0.8
+    / 0.85, car file 0 / 0.15 / 0.6 / 0.9.
+  - plsolmax comes from VVMDXSN (max pressure ratio in altitude by rpm,
+    2.42 to 1.76) and VVNTUXS (turbo overspeed, 4.0 flat), not KFLDHBN.
+  - plgru comes from DPLPU / DPLPUR, or plgru_w in the logs.
+  - The MATLAB MED9 GenerateKFVPDKSE is the model for a port.
+- FKKVS te axis is "effektive Einspritzzeit vor Feinabgleich": tevfa_w is
+  confirmed.
+- KFLDRAPP is rpm by pedal (wped), 8 x 8, with LDRAPP = 0, so forced-duty
+  logging works as on ME7.
+- KFKHFM exists (14 x 14, rpm by rl). The damos has no charge-air
+  temperature: CLATA names only TANS, so the MAF check stays out.
+- The car file's KFLDIMX axis is 0 / 50 / 100 / 300 / 500 / 600 / 800 /
+  1000 hPa, and its KFLDRL top column is 100 %. The damos file has 300 to
+  1000 hPa and 95 %. The logs reach about 1360 hPa relative, so the axis
+  is rescaled before the export, as on ME7.
 
 ## MG1CS201 boost: where we are
 

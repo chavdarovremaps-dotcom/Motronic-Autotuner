@@ -50,7 +50,7 @@ STATUS_MISSING = "Missing"
 OK_STATUSES = {STATUS_LOADED, STATUS_DIRECT, STATUS_FROM_JSON, STATUS_FLIPPED, STATUS_TRANSPOSED}
 
 _RPM_NAME_WORDS = ("motordrehzahl", "rpm", "giri")
-_RPM_UNIT_WORDS = ("u/min", "rpm", "1/min", "giri")
+_RPM_UNIT_WORDS = ("u/min", "upm", "rpm", "1/min", "giri")
 _LEGACY_X_NAME, _LEGACY_X_UNIT = 7, 8
 """Where the MATLAB code read the x axis name and unit; kept for exports without a header."""
 _LEGACY_TYPE = 3
@@ -116,10 +116,13 @@ def header_fields(lines: list[list[str]]) -> dict[str, int]:
     return {n: i for i, n in enumerate(names)} if "IdName" in names else {}
 
 
-def looks_like_rpm(values) -> bool:
-    """An increasing axis from at least 300 to at least 2000 with three or more points."""
+def looks_like_rpm(values, *, named: bool = False) -> bool:
+    """An increasing axis from at least 300 to at least 2000 with three or more
+    points. An axis the export itself calls rpm may start at 0 (ME7.6.2 KFPRGE,
+    KFVPDKSE: 0, 350, 700 ... or 0, 1000, 2000 ...)."""
     v = np.asarray(values, dtype=float).ravel()
-    return v.size >= 3 and bool(np.all(np.diff(v) > 0)) and float(v.min()) >= RPM_AXIS_MIN and float(v.max()) >= RPM_AXIS_TOP
+    low = 0.0 if named else RPM_AXIS_MIN
+    return v.size >= 3 and bool(np.all(np.diff(v) > 0)) and float(v.min()) >= low and float(v.max()) >= RPM_AXIS_TOP
 
 
 def _says_rpm(name: str, unit: str) -> bool:
@@ -138,7 +141,7 @@ def _axis_text(parts: list[str], header: dict[str, int]) -> tuple[bool, bool]:
 
 
 def _rpm_is_on_x(x: np.ndarray, y: np.ndarray, x_text: bool, y_text: bool) -> bool:
-    x_num, y_num = looks_like_rpm(x), looks_like_rpm(y)
+    x_num, y_num = looks_like_rpm(x, named=x_text), looks_like_rpm(y, named=y_text)
     if x_num != y_num:
         return x_num
     return x_text and not y_text
@@ -163,7 +166,7 @@ def _values_run_x_first(z: np.ndarray, x: np.ndarray, y: np.ndarray, map_type: s
     reading."""
     if map_type != INVERTED_TYPE:
         return False
-    x_num, y_num = looks_like_rpm(x), looks_like_rpm(y)
+    x_num, y_num = looks_like_rpm(x, named=x_text), looks_like_rpm(y, named=y_text)
     if x_text or y_text:
         return bool((x_text and x_num) or (y_text and y_num))
     if x.size != y.size:

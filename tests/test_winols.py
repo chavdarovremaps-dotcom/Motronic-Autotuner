@@ -190,3 +190,17 @@ def test_value_count_must_match_the_axes(tmp_path):
     path = write(tmp_path, HEADER64, line64("KFZW", 3, 2, np.arange(5, dtype=float), [10, 50, 90], [1000, 2000]))
     r = parse_export(path, [TargetMap("KFZW", "rpm_ign", "load_ign", "base_kfzw", "I")])
     assert r.rows[0].status == winols.STATUS_MISMATCH
+
+
+def test_named_rpm_axis_may_start_at_zero(tmp_path):
+    # ME7.6.2 KFPRGE: x = cam overlap [0, 90], y = rpm from 0, values run down the rpm list first
+    rpm = [0, 350, 700, 1000, 1400, 2100, 3500, 6300]
+    col = np.array([157.0, 100, 80, 46, 38, 30, 42, 70])
+    z = np.r_[col, col]
+    path = write(tmp_path, HEADER64, line64("KFPRGE", 8, 2, z, [0, 90], rpm, x_name="Ueberschneidungswinkel",
+                                            x_unit="KW", y_name="Motordrehzahl", y_unit="U/min",
+                                            map_type="eZweiInv"))
+    r = parse_export(path, [TargetMap("KFPRGE", "rpm_prg", "vvt_prg", "base_kfprg", "SR")])
+    assert r.rows[0].ok and r.axes["rpm_prg"].tolist() == rpm and r.axes["vvt_prg"].tolist() == [0, 90]
+    np.testing.assert_array_equal(r.base_maps["base_kfprg"], np.c_[col, col])
+    assert not winols.looks_like_rpm(rpm) and winols.looks_like_rpm(rpm, named=True)
