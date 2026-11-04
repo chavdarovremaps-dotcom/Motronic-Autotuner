@@ -75,7 +75,7 @@ VAR_LABELS = {
     "pu": "Ambient pressure (log pu to use CWLDIMX)",
     "knock": "Knock retard, average (wkrm, negative = retard)",
     "maf": "Airflow (ml_w; kg/h in the logs, converted to g/s)",
-    "iat": "Intake air temperature (tans, at the HFM before the turbo)",
+    "iat": "Charge air temperature for the MAF check (tans)",
     "time": "Time (ms in the file, seconds after import)",
 }
 

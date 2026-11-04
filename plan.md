@@ -210,9 +210,8 @@ the KFLDRL rows and finish. With provisional axes:
   spool they rise in order.
 - P comes out at 3.2 to 5.9 %/100 hPa.
 Not ported yet:
-- MAF check: tans is the intake air before the turbo (12-26 C at WOT, the
-  same as at idle), not a charge temperature after the intercooler, so the
-  density would be off by a boost-dependent amount.
+- MAF check: built on 2026-11-04, see the MAF check bullet below. Where
+  tans sits is still open.
 - ml_w is in kg/h. The vehicle reader does not keep the units row yet
   (its row under the header is the German descriptions).
 - pu is still not logged.
@@ -291,19 +290,20 @@ ME7.6.2 damos (2026-11-04):
     1500 rpm this file holds the throttle at about 34 % at full pedal.
   - ml_w is in kg/h. The vehicle reader now keeps the units row, and
     airflow_to_grams converts the airflow.
-  - There is no temperature after the intercooler: tans is at the HFM, and
-    CLATA only names TANS. The charge temperature is modelled: adiabatic
-    compression to boost / pu at 70 %, of which the intercooler leaves 25 %.
-    pu comes from plgru_w - DPLPU.
-  - On the Astra logs the model adds 16 C at the median and 30 C at most.
-  - With the raw tans, implied VE falls with load at every rpm from 4000
-    up (5000 rpm: 98 -> 94 %). The model flattens it (4520 rpm: 105.2 /
-    105.1 / 105.0).
-  - Implied VE is 88 % at 1800-2000, 106 % at 4000-4500 and 88 % at 6400
-    rpm, median 98 %. The 2520-3520 rows still rise with load, during spool.
-  - An intercooler efficiency of 60 / 75 / 90 % gives median VE 101 / 98 /
-    95 %. 75 % is the flattest across load. Even at 100 % (the charge at
-    tans), 4000 rpm reads about 100 %, so ml_w may read a few % high there.
+  - The temperature is tans as logged, the charge temperature as on ME7.
+    That is the user's call: tans drops in a pull (18.8 -> 15.0 C in
+    Log00012), and the user has seen the same on the 1.8T, a heat-soaked
+    sensor after the intercooler cooled by the charge air. The user will
+    check where it physically sits.
+  - A model for a sensor before the turbo stays as an option, off by
+    default (maf_charge_temp = model). It assumes 70 % compressor
+    efficiency, then 75 % intercooler, with pu from plgru_w - DPLPU, and
+    puts VE about 5 % higher.
+  - Result with tans: median VE 92.9 % (85.6 to 99.4 %) over 4244 rows.
+    It is 86 % at 1800-2000 rpm, 92-97 % at 3000-3500, about 100 % at
+    4000-4500, 94-98 % at 5000, 86 % at 6000 and 81-84 % at 6400.
+  - From 4000 rpm up, VE falls with load by 2-4 %. At 2520-3520 it rises
+    with load during spool.
 - The modelled-ps_w warning: on the Astra logs, 9.6 % of the rows have
   ps_w above pvdkds_w + 50 hPa. All of them are at wide-open throttle,
   around 2200 rpm, with a median excess of 79 hPa. rl_w follows the

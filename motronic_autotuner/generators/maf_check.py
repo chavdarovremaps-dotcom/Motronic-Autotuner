@@ -50,11 +50,11 @@ def airflow_at_ve(rpm, pressure_hpa, temp_c, displacement_cc: float, ve_pct: flo
 def charge_temperature(intake_c, boost_hpa, pu_hpa, *, compressor_eff: float = COMPRESSOR_EFFICIENCY,
                        intercooler_eff: float = INTERCOOLER_EFFICIENCY) -> np.ndarray:
     """Charge temperature after the intercooler (C) from the intake air before
-    the turbo, for an engine that logs no temperature after the intercooler
-    (ME7.6.2 Z20LEH: tans is at the HFM). The compressor heats the air as an
-    adiabatic compression at ``compressor_eff`` % efficiency to the boost
-    over pu; the intercooler takes ``intercooler_eff`` % of that rise back
-    out. No boost, no rise."""
+    the turbo, for an engine whose only air temperature sensor sits before
+    the turbo (an option on ME7.6.2; off by default). The compressor heats
+    the air as an adiabatic compression at ``compressor_eff`` % efficiency to
+    the boost over pu; the intercooler takes ``intercooler_eff`` % of that
+    rise back out. No boost, no rise."""
     t1 = np.asarray(intake_c, dtype=float) + 273.15
     ratio = np.maximum(np.asarray(boost_hpa, dtype=float) / np.asarray(pu_hpa, dtype=float), 1.0)
     rise = t1 * (ratio ** KAPPA_EXPONENT - 1.0) / (compressor_eff / 100.0)
