@@ -160,8 +160,8 @@ family means one `TargetMap` line and one generator wrapper.
 | --- | --- | --- | --- | --- |
 | Bosch ME7 | WinOLS CSV export | ME7-Logger (raw files with preamble, or stripped), TunerPro | boost, handover, warmup, fuel, ignition, manifold model incl. KFPBRK / KFPBRKNW | identical to MATLAB on real logs (KFPBRK is new, unit tests) |
 | Siemens MS43 (MS4X) | XDF + bin | TunerPro RT (ON/OFF flags) | closed-loop VE (trims or wideband, paste-ready corrected tables), knock removal on ip_iga_ron98_pl__n__maf | unit tests; VANOS limp-home warning on import |
-| Bosch ME1.5.5 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger, same shape and RAM names as ME7.6.2 | the ME7 six via `families/opel_vehicle.py`; knock from wkrm or worst cylinder (dwkrz_0_A..3_A); overrun rows dropped; zero-WGDC and modelled-ps_w warnings | unit tests; ingest run on the one Astra G log, no maps yet |
-| Bosch ME7.6.2 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger: RAM names, German descriptions, units row, time in ms | the ME7 six on Opel names (nmot, rl_w, wped, pvdkds_w, ps_w, ldtvm, tevfa_w, frm_w, fra_w, tmot, wkrm); overrun rows dropped; modelled-ps_w warning | unit tests; ingest run on the three Astra logs, no maps yet |
+| Bosch ME1.5.5 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger, same shape and RAM names as ME7.6.2 | the ME7 six plus the boost PID via `families/opel_vehicle.py`; knock from wkrm or worst cylinder (dwkrz_0_A..3_A); overrun rows dropped; zero-WGDC and modelled-ps_w warnings | unit tests; ingest run on the one Astra G log, no maps yet |
+| Bosch ME7.6.2 Opel (vehicle logs) | WinOLS CSV export (ME7 map names until an export proves otherwise) | vehicle logger: RAM names, German descriptions, units row, time in ms | the ME7 six plus the boost PID on Opel names (nmot, rl_w, wped, pvdkds_w, ps_w, ldtvm, tevfa_w, frm_w, fra_w, tmot, wkrm); overrun rows dropped; modelled-ps_w warning | unit tests; ingest and boost (provisional axes) run on the 2026-11-04 Astra logs, no WinOLS export yet |
 | Bosch MG1CS201 (MHD) | XDF + bin | MHD | timing knock removal on main 1/2 and cold 1/2 (average or worst cylinder), Fuel scalar 1 from STFT + LTFT without fuel-cut and shift rows, compressor feed-forward + P chain check; rows near gear changes ignored | unit tests; run on the reference log and on the 2026-09-23 stage 3 logs |
 
 Not started: MED9 (ME7 set plus KFLDHBN, KFVPDKSE with an extra tab), the
@@ -187,6 +187,25 @@ the files); dwkrz[0..3] per cylinder exist and are not used yet. pu is not
 logged, so CWLDIMX cannot be used until it is. Open: confirm wped (pedal)
 rather than wdk1 (throttle) for the WOT split, tevfa_w as the FKKVS te axis,
 and the WinOLS map names of the ME7.6.2 file.
+
+ME7.6.2 update (2026-11-04): eleven new Astra logs (`...\astra h 2.0
+hybrid\logs\`, SW 1037378796, Z20LEH, all WOT pulls at about 330-350
+rpm/s, one gear) with forced duties as on ME7: 0, 18, 23/24, 30, 40,
+47-50, 58, 64, 69-73, 90 %, integers rather than n/256. The Opel families
+now carry the boost PID (KFLDRQ0 / Q1 / Q2 / LDRQ1ST, ME7 names) next to
+the KFLDRL rows and finish. With provisional axes:
+- The spool sits at 3750 rpm (median boost 943 of a 1037 hPa peak).
+- Below the spool, levels from different files disagree. At 3500 rpm,
+  40 % made 880 hPa against 811 for 47 % and 825 for 50 %. Above the
+  spool they rise in order.
+- P comes out at 3.2 to 5.9 %/100 hPa.
+Not ported yet:
+- MAF check: tans is the intake air before the turbo (12-26 C at WOT, the
+  same as at idle), not a charge temperature after the intercooler, so the
+  density would be off by a boost-dependent amount.
+- ml_w is in kg/h. The vehicle reader does not keep the units row yet
+  (its row under the header is the German descriptions).
+- pu is still not logged.
 
 ## MG1CS201 boost: where we are
 

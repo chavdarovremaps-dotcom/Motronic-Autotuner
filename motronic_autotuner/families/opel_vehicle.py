@@ -95,6 +95,7 @@ PARAMS = [
     *me7.PRESSURE_REFERENCE[1:],
     *me7.KFLDRL,
     *me7.KFVPDKSD,
+    *me7.PID,
     *me7.MANIFOLD,
 ]
 
@@ -104,6 +105,10 @@ TARGET_MAPS = [
     TargetMap("KFLDIMX", "rpm_boost", "boost", "base_kfldimx", "Boost Control"),
     TargetMap("KFLDRL", "rpm_boost", "kfldrl_x", "base_kfldrl", "Boost Control"),
     TargetMap("KFVPDKSD", "rpm_kfvp", "pratio_kfvp", "base_kfvp", "Throttle Handover", direct=True),
+    TargetMap("KFLDRQ0", "rpm_kfldrq0", "x_kfldrq0", "base_kfldrq0", "Boost PID"),
+    TargetMap("KFLDRQ1", "rpm_kfldrq1", "x_kfldrq1", "base_kfldrq1", "Boost PID"),
+    TargetMap("KFLDRQ2", "rpm_kfldrq2", "x_kfldrq2", "base_kfldrq2", "Boost PID"),
+    TargetMap("LDRQ1ST", "row_ldrq1st", "rpm_ldrq1st", "base_ldrq1st", "Boost PID"),
     TargetMap("FKKVS", "rpm_fuel", "te", "base_fkkvs", "Fueling"),
     TargetMap("KFFWLW", "rpm_kffwlw", "load_kffwlw", "base_kffwlw", "Warmup Enrichment"),
     TargetMap("KFFWL", "tmot", "kffwl_trim", "base_kffwl", "Warmup Enrichment"),
@@ -184,6 +189,8 @@ def wastegate_never_driven(logs: SplitLogs, preset: Preset) -> list[str]:
 
 GENERATORS = [
     GeneratorSpec("boost", "Boost Control (KFLDIMX / KFLDRL)", ("wot",), ("rpm_boost", "boost", "kfldrl_x"), me7._boost),
+    GeneratorSpec("pid", "Boost PID (KFLDRQ0 / Q1 / Q2 / LDRQ1ST on the KFLDRL axis)", ("wot",),
+                  ("rpm_boost", "kfldrl_x", "rpm_kfldrq0", "x_kfldrq0"), me7._pid, required_base_maps=("base_kfldrq0",)),
     GeneratorSpec("handover", "Throttle Handover (KFVPDKSD)", ("wot",), ("rpm_kfvp", "pratio_kfvp"), me7._handover),
     GeneratorSpec("warmup", "Warmup Enrichment (KFFWL / KFFWLW)", ("warmup", "full"),
                   ("rpm_kffwlw", "load_kffwlw", "tmot"), me7._warmup),

@@ -81,7 +81,8 @@ def test_me7_generators_run_on_opel_names(tmp_path):
     keys = [m.key for m in res.maps]
     assert "kfldimx" in keys and "fkkvs" in keys and "kfzw" in keys
     skipped = [r for r in res.rows if r.status.startswith("Skipped")]
-    assert {r.name.split(" (")[0] for r in skipped} == {"Throttle Handover", "Warmup Enrichment", "Intake Manifold Model"}
+    assert {r.name.split(" (")[0] for r in skipped} == {"Boost PID", "Throttle Handover", "Warmup Enrichment",
+                                                         "Intake Manifold Model"}
 
     fk = res.map("fkkvs")                                      # x = te, y = rpm; WOT rows ran lambda trim 1.05 at te 12
     te_i, rpm_i = list(fk.x_axis).index(12.0), list(fk.y_axis).index(3000.0)
@@ -91,3 +92,16 @@ def test_me7_generators_run_on_opel_names(tmp_path):
     load_i = list(zw.x_axis).index(180.0)
     assert zw.values[list(zw.y_axis).index(3000.0), load_i] < -1.0
     assert zw.values[list(zw.y_axis).index(5000.0), load_i] == 0.0
+
+
+def test_boost_pid_moves_onto_the_kfldrl_axis(tmp_path):
+    write_vehicle_log(tmp_path / "Log00001.csv")
+    p = make_preset()
+    q_rpm, q_dev = np.array([1500, 3000, 4500, 6000.0]), np.array([0, 100, 200.0])
+    for name in ("kfldrq0", "kfldrq1", "kfldrq2"):
+        p.axes[f"rpm_{name}"], p.axes[f"x_{name}"] = q_rpm, q_dev
+        p.base_maps[f"base_{name}"] = np.full((q_rpm.size, q_dev.size), 5.0)
+    res = BOSCH_ME762.run_all(p, BOSCH_ME762.ingest(tmp_path, p))
+    q0 = res.map("kfldrq0_corrected")
+    assert q0 is not None and list(q0.y_axis) == list(RPM_AXIS)
+    assert any(m.startswith("Boost PID:") for m in res.messages)
