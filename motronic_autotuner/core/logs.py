@@ -142,7 +142,8 @@ def read_vehicle_logger_csv(path: str | Path) -> pd.DataFrame:
 
     Same cleaning as :func:`read_logger_csv`; the time column (the first)
     is converted to seconds when the units row says ``ms`` or, without a
-    units row, when the median step is above five.
+    units row, when the median step is above five. The units row is kept in
+    ``df.attrs["units"]`` (ml_w is in kg/h there), the time column's as s.
     """
     path = Path(path)
     with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
@@ -151,10 +152,16 @@ def read_vehicle_logger_csv(path: str | Path) -> pd.DataFrame:
     df = read_logger_csv(path)
     if df.shape[1] == 0:
         return df
+    if unit in TIME_UNITS:
+        names = [n.strip() for n in lines[0].split(",")]
+        units = [u.strip() for u in lines[2].split(",")]
+        df.attrs["units"] = {n: u for n, u in zip(names, units) if n}
     time_col = df.columns[0]
     step = df[time_col].dropna().diff().median() if df[time_col].notna().sum() > 1 else 0.0
     if unit == "ms" or (unit not in ("s", "sec", "sec.ms") and step > 5):
         df[time_col] = df[time_col] / 1000.0
+        if "units" in df.attrs and time_col in df.attrs["units"]:
+            df.attrs["units"][time_col] = "s"
     return df
 
 

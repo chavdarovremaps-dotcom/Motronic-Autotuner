@@ -31,15 +31,34 @@ R_AIR = 287.05
 """Specific gas constant of dry air, J/(kg K)."""
 DEFAULT_VE = 90.0
 DISPLACEMENT_1_8T = 1781.0
+DISPLACEMENT_2_0 = 1998.0
 DEFAULT_MIN_THROTTLE = 95.0
 CEILING_MIN_ROWS = 5
 """A value repeated at the column maximum this often is a sensor at its ceiling."""
+COMPRESSOR_EFFICIENCY = 70.0
+INTERCOOLER_EFFICIENCY = 75.0
+KAPPA_EXPONENT = 0.4 / 1.4
+"""(gamma - 1) / gamma of air."""
 
 
 def airflow_at_ve(rpm, pressure_hpa, temp_c, displacement_cc: float, ve_pct: float) -> np.ndarray:
     """Airflow in g/s of a four-stroke engine at volumetric efficiency ``ve_pct``."""
     rho = np.asarray(pressure_hpa, dtype=float) * 100.0 / (R_AIR * (np.asarray(temp_c, dtype=float) + 273.15))
     return ve_pct / 100.0 * rho * displacement_cc * 1e-6 * np.asarray(rpm, dtype=float) / 120.0 * 1000.0
+
+
+def charge_temperature(intake_c, boost_hpa, pu_hpa, *, compressor_eff: float = COMPRESSOR_EFFICIENCY,
+                       intercooler_eff: float = INTERCOOLER_EFFICIENCY) -> np.ndarray:
+    """Charge temperature after the intercooler (C) from the intake air before
+    the turbo, for an engine that logs no temperature after the intercooler
+    (ME7.6.2 Z20LEH: tans is at the HFM). The compressor heats the air as an
+    adiabatic compression at ``compressor_eff`` % efficiency to the boost
+    over pu; the intercooler takes ``intercooler_eff`` % of that rise back
+    out. No boost, no rise."""
+    t1 = np.asarray(intake_c, dtype=float) + 273.15
+    ratio = np.maximum(np.asarray(boost_hpa, dtype=float) / np.asarray(pu_hpa, dtype=float), 1.0)
+    rise = t1 * (ratio ** KAPPA_EXPONENT - 1.0) / (compressor_eff / 100.0)
+    return t1 + (1.0 - intercooler_eff / 100.0) * rise - 273.15
 
 
 def at_ceiling(values: np.ndarray, *, tol: float = 1.0, min_rows: int = CEILING_MIN_ROWS) -> np.ndarray:

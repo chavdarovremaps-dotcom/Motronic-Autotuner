@@ -285,6 +285,25 @@ ME7.6.2 damos (2026-11-04):
   - Replayed on Log00012, the new maps ask about 59-66 % at 4000-5000 rpm,
     where the ECU gave 31-38 %. The forced pulls needed 58-64 % for
     that boost.
+- MAF check on ME7.6.2 (2026-11-04), the ME7 check with 1998 cc. KFKHFM
+  is a target, 14 x 14 rpm by rl.
+  - Wide open is judged on the throttle wdk1, not the pedal: below about
+    1500 rpm this file holds the throttle at about 34 % at full pedal.
+  - ml_w is in kg/h. The vehicle reader now keeps the units row, and
+    airflow_to_grams converts the airflow.
+  - There is no temperature after the intercooler: tans is at the HFM, and
+    CLATA only names TANS. The charge temperature is modelled: adiabatic
+    compression to boost / pu at 70 %, of which the intercooler leaves 25 %.
+    pu comes from plgru_w - DPLPU.
+  - On the Astra logs the model adds 16 C at the median and 30 C at most.
+  - With the raw tans, implied VE falls with load at every rpm from 4000
+    up (5000 rpm: 98 -> 94 %). The model flattens it (4520 rpm: 105.2 /
+    105.1 / 105.0).
+  - Implied VE is 88 % at 1800-2000, 106 % at 4000-4500 and 88 % at 6400
+    rpm, median 98 %. The 2520-3520 rows still rise with load, during spool.
+  - An intercooler efficiency of 60 / 75 / 90 % gives median VE 101 / 98 /
+    95 %. 75 % is the flattest across load. Even at 100 % (the charge at
+    tans), 4000 rpm reads about 100 %, so ml_w may read a few % high there.
 - The modelled-ps_w warning: on the Astra logs, 9.6 % of the rows have
   ps_w above pvdkds_w + 50 hPa. All of them are at wide-open throttle,
   around 2200 rpm, with a median excess of 79 hPa. rl_w follows the

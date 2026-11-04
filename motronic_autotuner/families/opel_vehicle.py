@@ -52,6 +52,8 @@ DEFAULT_VARS = {
     "tmot": "tmot",
     "pu": "",
     "knock": "wkrm",
+    "maf": "ml_w",
+    "iat": "tans",
     "time": "Time",
 }
 
@@ -72,6 +74,8 @@ VAR_LABELS = {
     "tmot": "Coolant temp",
     "pu": "Ambient pressure (log pu to use CWLDIMX)",
     "knock": "Knock retard, average (wkrm, negative = retard)",
+    "maf": "Airflow (ml_w; kg/h in the logs, converted to g/s)",
+    "iat": "Intake air temperature (tans, at the HFM before the turbo)",
     "time": "Time (ms in the file, seconds after import)",
 }
 
@@ -207,7 +211,7 @@ GENERATORS = [
 
 VEHICLE_LOGS = LogSource(
     "vehicle", "Vehicle logger CSV (RAM names, descriptions, units, time in ms)",
-    reader=read_vehicle_logger_csv, hooks=(hack_5120, drop_overrun, knock_from_cylinders),
+    reader=read_vehicle_logger_csv, hooks=(hack_5120, drop_overrun, knock_from_cylinders, me7.airflow_to_grams),
 )
 
 
