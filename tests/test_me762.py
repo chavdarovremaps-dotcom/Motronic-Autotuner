@@ -81,8 +81,8 @@ def test_me7_generators_run_on_opel_names(tmp_path):
     keys = [m.key for m in res.maps]
     assert "kfldimx" in keys and "fkkvs" in keys and "kfzw" in keys
     skipped = [r for r in res.rows if r.status.startswith("Skipped")]
-    assert {r.name.split(" (")[0] for r in skipped} == {"Boost PID", "Throttle Handover", "Warmup Enrichment",
-                                                         "Intake Manifold Model"}
+    assert {r.name.split(" (")[0] for r in skipped} == {"Base Boost", "Boost PID", "Throttle Handover",
+                                                         "Warmup Enrichment", "Intake Manifold Model"}
 
     fk = res.map("fkkvs")                                      # x = te, y = rpm; WOT rows ran lambda trim 1.05 at te 12
     te_i, rpm_i = list(fk.x_axis).index(12.0), list(fk.y_axis).index(3000.0)

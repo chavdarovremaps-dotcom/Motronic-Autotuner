@@ -254,6 +254,37 @@ ME7.6.2 damos (2026-11-04):
   - On the car file the result is about 0.97-0.98 at ratio 0, 0.98-1.0
     at 0.15 and 1.0 from 0.6 up. The file had 0.95 / 0.955 / 0.99 / 1.0.
   - ME7.6.2 drops the KFVPDKSD generator and its auto-axis setting.
+- The ME7.6.2 LDR works above the base boost (2026-11-04, after the first
+  calibrated drive, Log00012):
+  - KFLDIMX and KFLDRL are looked up with plsolr_w = plsol_w - plgru_w;
+    all 12 logs agree within 10 hPa. They are not looked up above ambient
+    as on the 1.8T.
+  - Base boost is plgru_w = pu + DPLPU(nmot), from BGPLGU. In the car file
+    DPLPU is at $AD578 (axis, 4 x 16 bit, 0.25 rpm) and $AD580 (4 bytes,
+    10 hPa): 1000/2320/4000/6400 rpm -> +150/+610/+560/+370 hPa.
+  - DPLPUR (LDRPLSBY) at $ADC14 / $ADC1C holds the same curve. Neither is
+    in the ported export.
+  - plgru_w - DPLPU gives pu at 980-992 hPa in every log.
+  - KFLDIMX was rescaled to 400-1400 hPa as if ambient-relative. With it,
+    Log00012 got an I-part limit of KFLDIMX(plsolr 620-800) = 22-40 %.
+    ldtvm was 26-45 % against about 60 % needed, so boost ran 350-430 hPa
+    under target from 3000 rpm. The logged duty matches that lookup within
+    about 2 %.
+  - Fix:
+    - DPLPU / DPLPUR are fitted to the 0 % duty pull (generators/base_boost.py):
+      least squares on the curve's own 4 breakpoints, 10 hPa steps, pu per row
+      from plgru_w - file DPLPU. Result: +0 / +380 / +570 / +410.
+    - KFLDRL / KFLDIMX are measured above the base boost after the new
+      DPLPU: the logged plgru_w is moved by new - file DPLPU. This is the
+      `boost_reference` setting, plgru by default.
+    - KFLDIMX gets an axis from 0 to the 99th percentile of plsol - plgru,
+      rounded up to 50 hPa (0..850).
+    - The KFLDRL spool test stays on boost above ambient, because plgru
+      falls with rpm.
+    - KFVPDKSE cells use pu + new DPLPU, and pu comes from the logs.
+  - Replayed on Log00012, the new maps ask about 59-66 % at 4000-5000 rpm,
+    where the ECU gave 31-38 %. The forced pulls needed 58-64 % for
+    that boost.
 - The modelled-ps_w warning: on the Astra logs, 9.6 % of the rows have
   ps_w above pvdkds_w + 50 hPa. All of them are at wide-open throttle,
   around 2200 rpm, with a median excess of 79 hPa. rl_w follows the

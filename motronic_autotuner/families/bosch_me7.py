@@ -205,16 +205,19 @@ def _spool(ctx: RunContext, d):
                             share=float(ctx.p("spool_boost_share", 90)))
 
 
-def _boost(ctx: RunContext):
+def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
+           reference_label: str = "Target Rel Boost (mbar)", axis_boost=None, blocks=None):
     """KFLDIMX / KFLDRL; with the auto-axis tick the rpm axis is rebuilt around
     the spool point found in the WOT rows and written out as a block. A
-    family without the KFLDRL method / finish settings keeps the splat."""
+    family without the KFLDRL method / finish settings keeps the splat. A
+    family wrapper may pass its own WOT rows, the column the boost is
+    measured from, a KFLDIMX axis and blocks to put first (ME7.6.2)."""
     p = ctx.preset
-    d = ctx.logs.wot
+    d = ctx.logs.wot if data is None else data
     cwldimx = bool(ctx.p("cwldimx", False))
     ambient = float(ctx.p("ambient_pressure", 1000))
     axis_rpm = p.axis("rpm_boost")
-    blocks = []
+    blocks = list(blocks or [])
     if bool(ctx.p("auto_axis_kfldrl", False)):
         spool, info = _spool(ctx, d)
         if spool is None:
@@ -232,11 +235,13 @@ def _boost(ctx: RunContext):
         cwldimx=cwldimx, ambient_pressure=ambient,
         min_samples=float(ctx.p("min_samples_base_wg", 1)),
         fill_missing=bool(ctx.p("fill_missing_data", False)),
-        axis_rpm=axis_rpm, axis_boost=p.axis("boost"), axis_kfldrl_x=p.axis("kfldrl_x"),
+        axis_rpm=axis_rpm, axis_boost=p.axis("boost") if axis_boost is None else axis_boost,
+        axis_kfldrl_x=p.axis("kfldrl_x"),
         method=str(ctx.p("kfldrl_method", "splat")), finish=bool(ctx.p("kfldrl_finish", False)),
         spool_share=float(ctx.p("spool_boost_share", 90)),
         out_of_reach=float(ctx.p("kfldrl_out_of_reach", DUTY_OUT_OF_REACH)),
-        level_min_samples=float(ctx.p("kfldrl_level_samples", 3)), messages=ctx.messages,
+        level_min_samples=float(ctx.p("kfldrl_level_samples", 3)),
+        reference_column=reference_column, reference_label=reference_label, messages=ctx.messages,
     )
     return _on_sheet(blocks + maps, "Boost")
 
