@@ -1,6 +1,7 @@
-"""Throttle handover: base wastegate pressure curve and KFVPDKSD.
+"""Throttle handover: base wastegate pressure curve, KFVPDKSD and KFVPDKSE.
 
-Port of Scripts/Utilities/GenerateBaseWGPressure.m and GenerateKFVPDKSD.m.
+Port of Scripts/Utilities/GenerateBaseWGPressure.m, GenerateKFVPDKSD.m and
+GenerateKFVPDKSE.m (the MED9.1 transform, here for ME7.6.2).
 """
 
 from __future__ import annotations
@@ -153,3 +154,75 @@ def generate_handover_maps(data: pd.DataFrame, v: dict[str, str], *, min_samples
                                          f"{stock_below:g} follow the pattern.")
     maps.append(CalibrationMap("kfvp", "KFVPDKSD (Steady State Throttle Handover)", kfvp, axis_rpm, axis_pratio))
     return maps
+
+
+ZERO_DUTY = 0.5
+"""Rows at or under this duty are the 0 % pull: the gate on its spring alone."""
+
+
+def _held(axis_from, values, axis_to) -> np.ndarray:
+    """``values`` on ``axis_from`` read at ``axis_to``: linear, held flat past the ends, NaN skipped."""
+    axis_from, values = np.asarray(axis_from, dtype=float).ravel(), np.asarray(values, dtype=float).ravel()
+    ok = np.isfinite(values)
+    return np.interp(np.asarray(axis_to, dtype=float).ravel(), axis_from[ok], values[ok])
+
+
+def generate_kfvpdkse(data: pd.DataFrame, v: dict[str, str], *, min_samples: float, ambient_pressure: float,
+                      axis_rpm: np.ndarray, axis_ratio: np.ndarray,
+                      max_ratio_curves: list[tuple[np.ndarray, np.ndarray]],
+                      messages: list[str] | None = None) -> list[CalibrationMap]:
+    """KFVPDKSE, the steady-state target pressure ratio over the throttle, on
+    its normalised axis (ps - plgru) / (plsolmax - plgru).
+
+    The base boost plgru is the boost of the WOT rows at 0 % duty (the 0 %
+    pull), held flat outside the rpm it covers. The highest target plsolmax
+    is the lowest of the compressor pressure-ratio limits given (ME7.6.2:
+    VVMDXSN for altitude, VVNTUXS for turbo overspeed) times the ambient
+    pressure. Each cell stands for the absolute pressure plgru + ratio x
+    (plsolmax - plgru) at its rpm and takes the ME7 KFVPDKSD value there:
+    0.95 below the base boost, 1.0 above, 3 x 3 smoothed on the automatic
+    ratio axis (MATLAB GenerateKFVPDKSE for MED9.1).
+    """
+    messages = messages if messages is not None else []
+    axis_rpm = np.asarray(axis_rpm, dtype=float).ravel()
+    axis_ratio = np.asarray(axis_ratio, dtype=float).ravel()
+    zero = column(data, v["wgdc"]) <= ZERO_DUTY
+    rpm, boost = column(data, v["rpm"])[zero], column(data, v["boost"])[zero]
+    base_raw, counts = linear_1d(rpm, boost, axis_rpm, min_samples)
+    if np.isfinite(base_raw).sum() < 2:
+        raise ValueError(f"KFVPDKSE needs a WOT pull at 0 % duty: {int(zero.sum())} WOT rows at 0 %, "
+                         "fewer than two rpm points with data.")
+    base = _held(axis_rpm, base_raw, axis_rpm)
+    if not max_ratio_curves:
+        raise ValueError("KFVPDKSE needs the compressor pressure-ratio limit (VVMDXSN) for the highest target boost.")
+    limit = np.min([_held(a, r, axis_rpm) for a, r in max_ratio_curves], axis=0)
+    top = np.maximum(limit * ambient_pressure, base + 1.0)
+
+    grid = pratio_axis_from_curve(base, ambient_pressure)
+    if grid is None:
+        grid = np.round(np.linspace(HANDOVER_LOW, float(top.max()) / ambient_pressure, AUTO_AXIS_POINTS), 4)
+    me7 = generate_kfvpdksd(base, axis_rpm, grid, ambient_pressure)
+
+    target = base[None, :] + axis_ratio[:, None] * (top - base)[None, :]
+    kfvpdkse = np.empty_like(target)
+    for c in range(axis_rpm.size):
+        kfvpdkse[:, c] = np.interp(target[:, c] / ambient_pressure, grid, me7[:, c])
+    kfvpdkse = np.minimum(kfvpdkse, HANDOVER_HIGH)
+
+    covered = axis_rpm[np.isfinite(base_raw)]
+    messages.append(
+        f"KFVPDKSE: base boost from {int(zero.sum())} WOT rows at 0 % duty, {np.nanmin(base_raw):.0f} to "
+        f"{np.nanmax(base_raw):.0f} hPa abs at {covered[0]:g} to {covered[-1]:g} rpm, held flat beyond; highest target "
+        f"= lowest pressure-ratio limit x {ambient_pressure:g} hPa, {top.min():.0f} to {top.max():.0f} hPa; "
+        f"each cell takes the ME7 handover value (0.95 below the base boost, 1.0 above, smoothed) at "
+        f"base + ratio x (top - base).")
+    return [
+        CalibrationMap("kfvpdkse_base", "KFVPDKSE base boost from the 0 % duty pull (hPa abs)", base_raw, axis_rpm,
+                       ["Base boost"], counts=counts, counts_title="Base boost - SAMPLE WEIGHTS"),
+        CalibrationMap("kfvpdkse_top", "KFVPDKSE highest target boost, pressure-ratio limit x ambient (hPa abs)",
+                       top, axis_rpm, ["Max target"]),
+        CalibrationMap("kfvpdkse_target", "KFVPDKSE: boost each cell stands for (hPa abs)", target, axis_rpm,
+                       axis_ratio, corner_label="Ratio \\ RPM"),
+        CalibrationMap("kfvpdkse", "KFVPDKSE (steady-state throttle pressure ratio, paste into WinOLS)", kfvpdkse,
+                       axis_rpm, axis_ratio, corner_label="Ratio \\ RPM"),
+    ]

@@ -243,6 +243,23 @@ ME7.6.2 damos (2026-11-04):
   logging works as on ME7.
 - KFKHFM exists (14 x 14, rpm by rl). The damos has no charge-air
   temperature: CLATA names only TANS, so the MAF check stays out.
+- KFVPDKSE is built (2026-11-04) by the MED9 transform, in
+  `handover.generate_kfvpdkse`:
+  - plgru is the boost of the WOT rows at 0 % duty (the 0 % pull plus the
+    zero-duty starts of the other pulls), held flat outside its rpm.
+  - plsolmax is min(VVMDXSN, VVNTUXS) x the ambient setting.
+  - Each cell stands for plgru + ratio x (plsolmax - plgru). It takes the
+    ME7 KFVPDKSD value there: 0.95 below the base boost, 1.0 above, 3 x 3
+    smoothed on the automatic ratio axis.
+  - On the car file the result is about 0.97-0.98 at ratio 0, 0.98-1.0
+    at 0.15 and 1.0 from 0.6 up. The file had 0.95 / 0.955 / 0.99 / 1.0.
+  - ME7.6.2 drops the KFVPDKSD generator and its auto-axis setting.
+- The modelled-ps_w warning: on the Astra logs, 9.6 % of the rows have
+  ps_w above pvdkds_w + 50 hPa. All of them are at wide-open throttle,
+  around 2200 rpm, with a median excess of 79 hPa. rl_w follows the
+  file's KFURLE / KFPRGE through ps_w within about 1.5 % load, and a fit
+  gives the file's values back. On the Leon 1.8T, ps_w stays below
+  pvdks_w at WOT (median -27 hPa).
 - The car file's KFLDIMX axis is 0 / 50 / 100 / 300 / 500 / 600 / 800 /
   1000 hPa, and its KFLDRL top column is 100 %. The damos file has 300 to
   1000 hPa and 95 %. The logs reach about 1360 hPa relative, so the axis

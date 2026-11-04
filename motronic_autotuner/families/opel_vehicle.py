@@ -164,13 +164,17 @@ def modelled_manifold_pressure(logs: SplitLogs, preset: Preset) -> list[str]:
     ps, boost = v.get("ps_w", ""), v.get("boost", "")
     if len(d) == 0 or ps not in d.columns or boost not in d.columns:
         return []
-    share = float((d[ps] > d[boost] + PS_ABOVE_BOOST_HPA).mean())
+    above = d[ps] > d[boost] + PS_ABOVE_BOOST_HPA
+    share = float(above.mean())
     if share < 0.02:
         return []
+    excess = (d.loc[above, ps] - d.loc[above, boost]).median()
     return [
-        f"{ps} is more than {PS_ABOVE_BOOST_HPA:g} hPa above {boost} in {share * 100:.0f} % of the rows, so it is "
-        "a modelled manifold pressure, not a sensor reading. KFURL and KFPRG computed from it only reproduce the "
-        "model already in the file."
+        f"{ps} is more than {PS_ABOVE_BOOST_HPA:g} hPa above {boost} in {share * 100:.0f} % of the rows (median "
+        f"{excess:.0f} hPa), so it is a modelled manifold pressure, not a sensor reading: the manifold cannot hold "
+        f"more pressure than there is before the throttle. The ECU computes {ps} from the HFM load through its own "
+        "KFURL / KFPRG, so the KFURL / KFPRG blocks fitted to it give the file's values back and are not a "
+        "calibration."
     ]
 
 
@@ -206,9 +210,11 @@ VEHICLE_LOGS = LogSource(
 
 
 def opel_vehicle_family(*, key: str, display_name: str, excel_default_name: str,
-                        knock_cylinders: tuple[str, ...], target_maps: list[TargetMap] | None = None) -> Family:
+                        knock_cylinders: tuple[str, ...], target_maps: list[TargetMap] | None = None,
+                        params: list[ParamSpec] | None = None,
+                        generators: list[GeneratorSpec] | None = None) -> Family:
     """Build one Opel family: the shared declaration plus its per-cylinder knock channel names
-    and, once its damos is known, its own map names (default: the ME7 names)."""
+    and, once its damos is known, its own map names, settings and generators (default: the ME7 set)."""
     default_vars = dict(DEFAULT_VARS)
     labels = dict(VAR_LABELS)
     for i, name in enumerate(knock_cylinders, start=1):
@@ -222,10 +228,10 @@ def opel_vehicle_family(*, key: str, display_name: str, excel_default_name: str,
         display_name=display_name,
         default_vars=default_vars,
         var_labels=labels,
-        params=PARAMS,
+        params=PARAMS if params is None else params,
         target_maps=list(TARGET_MAPS if target_maps is None else target_maps),
         log_sources=[VEHICLE_LOGS],
-        generators=GENERATORS,
+        generators=GENERATORS if generators is None else generators,
         post_process=[me7._apply_5120_scaling],
         ingest_checks=[modelled_manifold_pressure, wastegate_never_driven],
         default_prep=DEFAULT_PREP,
