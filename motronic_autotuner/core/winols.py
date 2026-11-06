@@ -210,6 +210,12 @@ def _extract(parts: list[str], t: TargetMap, result: ImportResult, status: MapSt
     z = _numbers(parts[-3])
     x = _numbers(parts[-2])
     y = _numbers(parts[-1])
+    x_text, y_text = _axis_text(parts, header)
+    if x.size == 0 and y.size > 1 and z.size == y.size:
+        # a curve defined with its axis on Y and no X (512 kB ME7.5 URLNM / PRGNM after the user fixed their
+        # axis): the same curve as one along X
+        x, y, x_text, y_text = y, np.array([]), y_text, x_text
+        num_cols, num_rows = x.size, 1
     if y.size == 0 and num_rows == 1:
         y = np.array([0.0])
     if x.size == 0 or y.size == 0 or z.size == 0:
@@ -221,10 +227,9 @@ def _extract(parts: list[str], t: TargetMap, result: ImportResult, status: MapSt
         return
     type_index = header.get("Type", _LEGACY_TYPE)
     map_type = parts[type_index].strip() if type_index < len(parts) else ""
-    x_text, y_text = _axis_text(parts, header)
     x_first = _values_run_x_first(z, x, y, map_type, x_text, y_text)
     z_matrix = z.reshape(x.size, y.size).T.copy() if x_first else z.reshape(y.size, x.size)
-    healed = x_first or x.size != num_cols or y.size != num_rows
+    healed = (x_first and y.size > 1) or x.size != num_cols or y.size != num_rows  # a curve has one order
     # from here z_matrix is (y.size, x.size): x along the columns, y down the rows
 
     expects_rpm_rows = "rpm" in t.y_axis_key.lower()

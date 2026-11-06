@@ -204,3 +204,14 @@ def test_named_rpm_axis_may_start_at_zero(tmp_path):
     assert r.rows[0].ok and r.axes["rpm_prg"].tolist() == rpm and r.axes["vvt_prg"].tolist() == [0, 90]
     np.testing.assert_array_equal(r.base_maps["base_kfprg"], np.c_[col, col])
     assert not winols.looks_like_rpm(rpm) and winols.looks_like_rpm(rpm, named=True)
+
+
+def test_curve_with_its_axis_on_y_reads_as_a_curve(tmp_path):
+    # 512 kB ME7.5 URLNM after the axis was set to Upm, 0.25: 30 x 1, X empty, the rpm values on Y
+    rpm = RPM10 + [6000 + i for i in range(1, 21)]
+    z = [0.09] * 30
+    path = write(tmp_path, HEADER64, line64("URLNM", 30, 1, z, [], rpm, y_unit="Upm", map_type="eZweiInv"))
+    r = parse_export(path, [TargetMap("URLNM", "row_urlnm", "rpm_urlnm", "base_urlnm", "SR")])
+    assert r.rows[0].ok and r.rows[0].dims == "1 x 30"
+    assert r.axes["rpm_urlnm"].tolist() == [float(v) for v in rpm] and r.axes["row_urlnm"].tolist() == [0.0]
+    assert r.base_maps["base_urlnm"].shape == (1, 30)

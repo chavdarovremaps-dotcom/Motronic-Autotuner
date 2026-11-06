@@ -155,20 +155,25 @@ family means one `TargetMap` line and one generator wrapper.
     There is no KFURL / KFPRG and no KFPBRKNW. The fit runs on the real
     points; points without rows keep the file's value; the padding holds
     the last one.
-  - The user's map pack gives PRGNM's axis factor 0.1 and kg/h (280 ..
-    2400). Those are the bytes of URLNM's rpm axis, so PRGNM is taken at
-    URLNM's rpm.
-  - KFPBRK is the unused default: all 1.0 on 0 .. 9000 rpm by 0 .. 843.75 %
-    load. The app warns: give it real axes before using it.
-  - KFKHFM reads 0 in every cell: a map-pack definition error. The MAF
-    check leaves its information block out and says so.
+  - The first map pack gave PRGNM's axis factor 0.1 and kg/h (280 ..
+    2400), the bytes of URLNM's rpm axis. An axis proportional to URLNM's
+    is still read as URLNM's. The user has since set it to Upm, factor
+    0.25.
+  - After that fix WinOLS exports URLNM / PRGNM as 30 x 1 with X empty and
+    the rpm on Y. The importer reads a curve with its axis on Y as a curve.
+  - KFPBRK came as the unused default: all 1.0 on 0 .. 9000 rpm by 0 ..
+    843.75 % load. The user has given it real axes (1000 .. 6500 rpm by
+    0 .. 194 % load). The app still warns when a load axis passes 400 %.
+  - KFKHFM read 0 in every cell because it was exported in WinOLS's
+    percent-difference view; the export fields do not show the view. The
+    MAF check then leaves its information block out and says so.
   - Generators take either layout: GeneratorSpec axes and base maps can be
     any-of tuples.
-  - Spool on this car: even 0 % duty makes about 1000 hPa at 6000 rpm, so
-    the median-of-all-WOT-rows spool comes out at 4850 rpm (share 60 %) or
-    5500 rpm (90 %), while the 82-91 % duties make 1060-1200 hPa from
-    2750-3000 rpm. Open: spool from the highest-boost duty level per rpm
-    (as the KFLDRL finish does) instead of the median.
+  - Spool on this car: its hybrid turbo makes about 1000 hPa at 6000 rpm
+    even at 0 % duty, so the median-of-all-WOT-rows spool comes out late:
+    4850 rpm at a 60 % share, 5500 rpm at 90 %. The 82-91 % duties make
+    1060-1200 hPa from 2750-3000 rpm. The user's decision (2026-11-06):
+    leave the detection as it is; this car is the exception.
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
   Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
   the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)

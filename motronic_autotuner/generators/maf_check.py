@@ -104,8 +104,9 @@ def generate_maf_check(data: pd.DataFrame, v: dict[str, str], *, axis_rpm: np.nd
         base = np.asarray(base_map, dtype=float)
         if not (np.isfinite(base) & (base > 0)).any():
             messages.append("MAF check: the imported KFKHFM is 0 in every cell, which no running ECU has (it is a "
-                            "factor around 1.0): the map's address or factor in the WinOLS map pack is off. The "
-                            "information block is left out.")
+                            "factor around 1.0): most likely it was exported in a difference view (percent "
+                            "difference to the original), else its address or factor is off. Export it in the "
+                            "normal view; the information block is left out.")
         elif base.shape == err_map.shape:
             info = np.where(np.isnan(err_map), np.nan, base / (1.0 + err_map / 100.0))
             maps.append(CalibrationMap(
