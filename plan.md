@@ -137,7 +137,38 @@ family means one `TargetMap` line and one generator wrapper.
   stays as a choice. KFLDRAPP is only used for open-loop logging (code
   word set to 8) and is never touched. The in-between duties in the logs
   (15 to 33 % at 5100 to 6500 rpm) are KFLDRAPP interpolating between its
-  rpm rows, held a fraction of a second each.
+  rpm rows, held a fraction of a second each. The PID rpm axes of both ME7.5
+  layouts are bytes in 40 rpm steps (1000, 1240, 1520 ...), so the KFLDRL
+  axis is rounded to them before the maps move (2026-11-06).
+- 512 kB ME7.5 layout (06A906032S, HW 0261206197, SW 352760, narrowband;
+  `...\_Files\seat leon 1.8t s3 setup\`, 2026-11-06). Same KFLDIMX /
+  KFLDRL / KFVPDKSD / FKKVS / KFZW / KFFWL(W) names; KFZW and KFKHFM with
+  byte axes.
+  - Boost PID: LDRQ0DY and LDRQ1DY (dynamic P and I, curves) and LDRQ1ST
+    share one 16-point axis. LDRQ0S is a single stationary P (2.0; the
+    export cannot carry it). KFLDRQ2 is 4 x 8 on an rpm axis of its own.
+    The stock LDRQ0DY / LDRQ1DY are exactly a KFLDRQ0 / KFLDRQ1 column of
+    the 1 MB file. P goes into LDRQ0DY. The curves move onto the KFLDRL
+    axis; KFLDRQ2 keeps its axis and is only scaled in the ratio modes.
+  - Manifold model: URLNM and PRGNM are curves over rpm, 30 points of which
+    10 are real (700 .. 6000 rpm) and the rest padding in 1 rpm steps.
+    There is no KFURL / KFPRG and no KFPBRKNW. The fit runs on the real
+    points; points without rows keep the file's value; the padding holds
+    the last one.
+  - The user's map pack gives PRGNM's axis factor 0.1 and kg/h (280 ..
+    2400). Those are the bytes of URLNM's rpm axis, so PRGNM is taken at
+    URLNM's rpm.
+  - KFPBRK is the unused default: all 1.0 on 0 .. 9000 rpm by 0 .. 843.75 %
+    load. The app warns: give it real axes before using it.
+  - KFKHFM reads 0 in every cell: a map-pack definition error. The MAF
+    check leaves its information block out and says so.
+  - Generators take either layout: GeneratorSpec axes and base maps can be
+    any-of tuples.
+  - Spool on this car: even 0 % duty makes about 1000 hPa at 6000 rpm, so
+    the median-of-all-WOT-rows spool comes out at 4850 rpm (share 60 %) or
+    5500 rpm (90 %), while the 82-91 % duties make 1060-1200 hPa from
+    2750-3000 rpm. Open: spool from the highest-boost duty level per rpm
+    (as the KFLDRL finish does) instead of the median.
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
   Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
   the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)

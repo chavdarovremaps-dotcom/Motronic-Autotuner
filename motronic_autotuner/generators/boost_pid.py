@@ -19,6 +19,15 @@ for the tuner to set by hand.
 
 The older rule, scaling all three gains by the ratio of the duty the logs
 need over the duty the file holds (read from KFLDRL), stays as a choice.
+
+The 512 kB ME7.5 files (06A906032S, SW 352760) have the older LDR layout:
+P and I are curves over rpm, LDRQ0DY and LDRQ1DY (dynamic), next to the
+stationary LDRQ1ST curve and LDRQ0S, a single stationary P; the three
+curves share one rpm axis, and KFLDRQ2 has 8 rpm points of its own. The
+stock values are those of the 1 MB maps (LDRQ0DY is a KFLDRQ0 column), so
+P goes into LDRQ0DY there, the curves move onto the KFLDRL axis and
+KFLDRQ2 keeps its axis. The PID rpm axes of both layouts are bytes in
+40 rpm steps (1000, 1240, 1520 ...), so the new axis is snapped to them.
 """
 
 from __future__ import annotations
@@ -36,6 +45,8 @@ MIN_LEVEL_SAMPLES = 10.0
 """Sample weight a duty needs at an rpm point to count."""
 MIN_DUTY_STEP = 4.0
 """Two duties closer than this are not compared: a 1 % gap would multiply the noise by ten."""
+PID_AXIS_STEP = 40.0
+"""The LDR PID rpm axes seen so far are bytes in 40 rpm steps."""
 
 
 # ---- rescaling onto the KFLDRL axis -------------------------------------------
@@ -173,42 +184,107 @@ def ratio_factor(ratio: dict, mode: str) -> np.ndarray:
 # ---- the generator --------------------------------------------------------------
 
 
+def rom_step(axis) -> float | None:
+    """PID_AXIS_STEP when every point of a file's axis is a multiple of it and one
+    is not a multiple of 50 (so it is not just a round axis), else None."""
+    a = np.asarray(axis, dtype=float).ravel()
+    if a.size == 0:
+        return None
+    on_step = np.isclose(np.remainder(a + PID_AXIS_STEP / 2, PID_AXIS_STEP), PID_AXIS_STEP / 2)
+    on_fifty = np.isclose(np.remainder(a + 25.0, 50.0), 25.0)
+    return PID_AXIS_STEP if bool(on_step.all()) and not bool(on_fifty.all()) else None
+
+
+def snap_axis(axis: np.ndarray, step: float | None) -> np.ndarray:
+    """The axis rounded to ``step``, kept as it is when that would make it stop rising."""
+    axis = np.asarray(axis, dtype=float).ravel()
+    if step is None:
+        return axis
+    snapped = np.round(axis / step) * step
+    return snapped if bool(np.all(np.diff(snapped) > 0)) else axis
+
+
+def _same_axis(a, b) -> bool:
+    a, b = np.asarray(a, dtype=float).ravel(), np.asarray(b, dtype=float).ravel()
+    return a.size == b.size and bool(np.allclose(a, b))
+
+
 def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
-                      ldrq1st: tuple[np.ndarray, np.ndarray] | None, mode: str,
+                      mode: str, ldrq1st: tuple[np.ndarray, np.ndarray] | None = None,
+                      curves: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
                       logs_rpm=None, logs_boost=None, logs_duty=None, spool_rpm: float | None = None,
                       kfldrl: CalibrationMap | None = None, factory_kfldrl=None, factory_axis_rpm=None,
                       factory_axis_x=None, min_samples: float = MIN_LEVEL_SAMPLES, min_step: float = MIN_DUTY_STEP,
                       min_file_duty: float = MIN_FILE_DUTY, messages: list[str] | None = None) -> list[CalibrationMap]:
-    """``q_maps`` maps "KFLDRQ0" / "KFLDRQ1" / "KFLDRQ2" to ``(base, axis_rpm, axis_deviation)``.
+    """``q_maps`` maps "KFLDRQ0" / "KFLDRQ1" / "KFLDRQ2" to ``(base, axis_rpm, axis_deviation)``;
+    ``curves`` maps "LDRQ0DY" / "LDRQ1DY" / "LDRQ1ST" to ``(base, axis_rpm)`` (``ldrq1st`` is the same
+    as a curve). P goes into KFLDRQ0, or into LDRQ0DY in the 512 kB layout.
 
-    ``mode`` is "sensitivity" (P from the logs, Q1 and Q2 only moved onto the
-    axis), or "overall" / "per_rpm" (all three scaled by the duty ratio).
+    The maps on the P map's rpm axis move onto ``axis_rpm`` (snapped to the file's 40 rpm steps);
+    a map with an rpm axis of its own keeps it and is only scaled in the ratio modes.
+
+    ``mode`` is "sensitivity" (P from the logs, the rest only moved onto the axis), or "overall" /
+    "per_rpm" (all gains scaled by the duty ratio).
     """
     messages = messages if messages is not None else []
-    axis_rpm = np.asarray(axis_rpm, dtype=float).ravel()
-    moved = {name: (rescale_rows(base, a_rpm, axis_rpm), np.asarray(a_dev, dtype=float).ravel())
-             for name, (base, a_rpm, a_dev) in q_maps.items()}
-    maps = [axis_block("rpm_axis_ldrq", "KFLDRQ0 / Q1 / Q2 / LDRQ1ST RPM axis (paste into WinOLS)", axis_rpm, "RPM")]
+    curves = dict(curves or {})
+    if ldrq1st is not None:
+        curves.setdefault("LDRQ1ST", ldrq1st)
+    p_name = "KFLDRQ0" if "KFLDRQ0" in q_maps else ("LDRQ0DY" if "LDRQ0DY" in curves else None)
+    shared = None
+    if p_name is not None:
+        shared = q_maps[p_name][1] if p_name in q_maps else curves[p_name][1]
+    requested = np.asarray(axis_rpm, dtype=float).ravel()
+    axis_rpm = snap_axis(requested, rom_step(shared) if shared is not None else None)
+    if not np.array_equal(axis_rpm, requested):
+        messages.append(f"Boost PID: the file's PID rpm axis is in {PID_AXIS_STEP:g} rpm steps, so the KFLDRL axis "
+                        f"is rounded to them: {', '.join(f'{a:g}' for a in axis_rpm)}.")
+
+    # name -> [values, deviation axis or None, rpm axis, on the shared axis]
+    out: dict[str, list] = {}
+    for name, (base, a_rpm, a_dev) in q_maps.items():
+        dev = np.asarray(a_dev, dtype=float).ravel()
+        if shared is None or _same_axis(a_rpm, shared):
+            out[name] = [rescale_rows(base, a_rpm, axis_rpm), dev, axis_rpm, True]
+        else:
+            out[name] = [np.asarray(base, dtype=float), dev, np.asarray(a_rpm, dtype=float).ravel(), False]
+    for name, (base, a_rpm) in curves.items():
+        if shared is None or _same_axis(a_rpm, shared):
+            out[name] = [rescale_rows(base, a_rpm, axis_rpm), None, axis_rpm, True]
+        else:
+            out[name] = [np.asarray(base, dtype=float).ravel(), None, np.asarray(a_rpm, dtype=float).ravel(), False]
+    how = {name: ("same values on the KFLDRL axis" if o[3] else "own rpm axis, unchanged") for name, o in out.items()}
+    on_shared = [name for name in out if out[name][3]]
+    maps = [axis_block("rpm_axis_ldrq", f"{' / '.join(on_shared) or 'PID'} RPM axis (paste into WinOLS)",
+                       axis_rpm, "RPM")]
     corner = "RPM \\ Deviation hPa"
-    factor = np.ones(axis_rpm.size)
-    how = {name: "same values on the KFLDRL axis" for name in moved}
+    old_layout = p_name == "LDRQ0DY"
 
     if mode == "sensitivity":
         levels, table, weights = boost_per_duty(logs_rpm, logs_boost, logs_duty, axis_rpm, min_samples=min_samples)
         res = p_from_sensitivity(levels, table, axis_rpm, spool_rpm, min_step=min_step)
-        if np.isnan(res["p_used"]).all():
-            messages.append("Boost PID: no rpm point after the spool shows boost rising with duty, KFLDRQ0 not calculated.")
+        if p_name is None:
+            messages.append("Boost PID: neither KFLDRQ0 nor LDRQ0DY imported, P not calculated.")
+        elif np.isnan(res["p_used"]).all():
+            messages.append(f"Boost PID: no rpm point after the spool shows boost rising with duty, {p_name} not "
+                            "calculated.")
         else:
-            q0, dev = moved["KFLDRQ0"]
-            moved["KFLDRQ0"] = (np.tile(res["p_used"][:, None], (1, dev.size)), dev)
-            how["KFLDRQ0"] = "P from the boost sensitivity"
+            file_p = np.asarray(out[p_name][0], dtype=float)
+            file_p = file_p[:, 0] if file_p.ndim == 2 else file_p
+            if old_layout:
+                out[p_name][0] = res["p_used"].copy()
+            else:
+                out[p_name][0] = np.tile(res["p_used"][:, None], (1, out[p_name][1].size))
+            how[p_name] = "P from the boost sensitivity"
             from_logs = [s == "logs" for s in res["source"]]
             messages.append(
-                f"Boost PID: P from the logs at {sum(from_logs)} of {axis_rpm.size} rpm points, "
+                f"Boost PID: P ({p_name}) from the logs at {sum(from_logs)} of {axis_rpm.size} rpm points, "
                 f"{np.nanmin(res['p_used']):.2f} to {np.nanmax(res['p_used']):.2f} %/100 hPa; spool at "
                 f"{spool_rpm:g} rpm, the points below it take the first P after it." if spool_rpm is not None else
-                f"Boost PID: P from the logs at {sum(from_logs)} of {axis_rpm.size} rpm points.")
-            file_p = q0[:, 0]
+                f"Boost PID: P ({p_name}) from the logs at {sum(from_logs)} of {axis_rpm.size} rpm points.")
+            if old_layout:
+                messages.append("Boost PID: LDRQ0S, the stationary P (one value), is not in the export and is left "
+                                "as it is.")
             maps.append(CalibrationMap(
                 "ldr_sensitivity", "Boost sensitivity and P per rpm", np.vstack([
                     res["rise"], res["low"], res["high"], res["p_raw"], res["p_used"], file_p]),
@@ -233,14 +309,17 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                 messages.append(f"Boost PID: no KFLDRL cell with data where the file's duty is at least "
                                 f"{min_file_duty:g} %, nothing scaled.")
             else:
-                factor = np.interp(axis_rpm, ratio["axis_rpm"], ratio_factor(ratio, mode))
-                for name in moved:
-                    base, dev = moved[name]
-                    moved[name] = (base * factor[:, None], dev)
+                per_point = ratio_factor(ratio, mode)
+                for name, o in out.items():
+                    factor = np.interp(o[2], ratio["axis_rpm"], per_point)
+                    o[0] = o[0] * (factor[:, None] if np.ndim(o[0]) == 2 else factor)
                     how[name] = "per rpm duty ratio" if mode == "per_rpm" else f"x {ratio['overall']:.3f}"
                 messages.append(f"Boost PID: the logs need {ratio['overall']:.3f} of the duty in the file "
-                                f"({int(ratio['cells'].sum())} KFLDRL cells); Q0, Q1 and Q2 scaled "
+                                f"({int(ratio['cells'].sum())} KFLDRL cells); {', '.join(out)} scaled "
                                 f"{'per rpm' if mode == 'per_rpm' else 'by that ratio'}.")
+                if old_layout:
+                    messages.append(f"Boost PID: LDRQ0S, the stationary P (one value), is not in the export: "
+                                    f"multiply it by {ratio['overall']:.3f} by hand.")
                 maps.append(CalibrationMap(
                     "ldr_scale", f"LDR PID scale: duty from the logs over duty in the file (overall {ratio['overall']:.3f})",
                     np.vstack([ratio["file_mean"], ratio["new_mean"], ratio["per_rpm"], ratio["cells"].astype(float)]),
@@ -248,12 +327,13 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                     corner_label="Scale \\ RPM"))
 
     for name in ("KFLDRQ0", "KFLDRQ1", "KFLDRQ2"):
-        if name in moved:
-            values, dev = moved[name]
+        if name in out:
+            values, dev, a_rpm, _ = out[name]
             maps.append(CalibrationMap(f"{name.lower()}_corrected", f"{name} ({how[name]}, paste into WinOLS)",
-                                       values, dev, axis_rpm, corner_label=corner))
-    if ldrq1st is not None:
-        base, a_rpm = ldrq1st
-        maps.append(CalibrationMap("ldrq1st_corrected", "LDRQ1ST (same values on the KFLDRL axis, paste into WinOLS)",
-                                   rescale_rows(base, a_rpm, axis_rpm), axis_rpm, ["LDRQ1ST"]))
+                                       values, dev, a_rpm, corner_label=corner))
+    for name in ("LDRQ0DY", "LDRQ1DY", "LDRQ1ST"):
+        if name in out:
+            values, _, a_rpm, _ = out[name]
+            maps.append(CalibrationMap(f"{name.lower()}_corrected", f"{name} ({how[name]}, paste into WinOLS)",
+                                       values, a_rpm, [name]))
     return maps

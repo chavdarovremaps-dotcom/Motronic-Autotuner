@@ -110,22 +110,33 @@ class RunContext:
         return self.preset.params.get(key, default)
 
 
+def _absent(required, get) -> list[str]:
+    """The required keys ``get`` finds nothing for; a tuple entry needs one of its keys."""
+    missing = []
+    for entry in required:
+        keys = (entry,) if isinstance(entry, str) else tuple(entry)
+        if all(get(k) is None for k in keys):
+            missing.append(" or ".join(keys))
+    return missing
+
+
 @dataclass(frozen=True)
 class GeneratorSpec:
     key: str
     label: str
     subsets: tuple[str, ...]
     """Log subsets that must be non-empty: any of "full", "wot", "warmup", "hot"."""
-    required_axes: tuple[str, ...]
+    required_axes: tuple[str | tuple[str, ...], ...]
+    """An entry that is a tuple is met by any one of its keys: two map layouts of one family."""
     run: Callable[[RunContext], list[CalibrationMap]]
-    required_base_maps: tuple[str, ...] = ()
+    required_base_maps: tuple[str | tuple[str, ...], ...] = ()
 
     def readiness(self, preset: Preset, logs: SplitLogs) -> str | None:
         """None when the generator can run, else the reason it is skipped."""
-        missing = [a for a in self.required_axes if preset.axis(a) is None]
+        missing = _absent(self.required_axes, preset.axis)
         if missing:
             return f"Missing axes in preset: {', '.join(missing)}"
-        missing = [m for m in self.required_base_maps if preset.base_map(m) is None]
+        missing = _absent(self.required_base_maps, preset.base_map)
         if missing:
             return f"Missing base maps in preset: {', '.join(missing)}"
         empty = [s for s in self.subsets if len(logs.subset(s)) == 0]

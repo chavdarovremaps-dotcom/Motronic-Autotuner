@@ -6,7 +6,8 @@ from __future__ import annotations
 import numpy as np
 
 from ..core.logs import hack_5120
-from ..core.winols import TargetMap
+from ..core.maps import CalibrationMap
+from ..core.winols import TargetMap, looks_like_rpm
 from ..generators import axis_block, column
 from ..generators.boost import DUTY_OUT_OF_REACH, detect_spool_rpm, generate_boost_maps, spool_rpm_axis
 from ..generators.boost_pid import MIN_DUTY_STEP, MIN_LEVEL_SAMPLES, generate_pid_maps
@@ -176,6 +177,8 @@ TARGET_MAPS = [
     TargetMap("KFLDRQ1", "rpm_kfldrq1", "x_kfldrq1", "base_kfldrq1", "Boost PID"),
     TargetMap("KFLDRQ2", "rpm_kfldrq2", "x_kfldrq2", "base_kfldrq2", "Boost PID"),
     TargetMap("LDRQ1ST", "row_ldrq1st", "rpm_ldrq1st", "base_ldrq1st", "Boost PID"),
+    TargetMap("LDRQ0DY", "row_ldrq0dy", "rpm_ldrq0dy", "base_ldrq0dy", "Boost PID (512 kB layout)"),
+    TargetMap("LDRQ1DY", "row_ldrq1dy", "rpm_ldrq1dy", "base_ldrq1dy", "Boost PID (512 kB layout)"),
     TargetMap("FKKVS", "rpm_fuel", "te", "base_fkkvs", "Fueling"),
     TargetMap("KFKHFM", "rpm_kfkhfm", "load_kfkhfm", "base_kfkhfm", "MAF Check"),
     TargetMap("KFFWLW", "rpm_kffwlw", "load_kffwlw", "base_kffwlw", "Warmup Enrichment"),
@@ -185,7 +188,12 @@ TARGET_MAPS = [
     TargetMap("KFPBRKNW", "rpm_pbrknw", "load_pbrknw", "base_kfpbrknw", "Saugrohrmodell"),
     TargetMap("KFPRG", "rpm_prg", "vvt_prg", "base_kfprg", "Saugrohrmodell"),
     TargetMap("KFURL", "rpm_url", "vvt_url", "base_kfurl", "Saugrohrmodell"),
+    TargetMap("URLNM", "row_urlnm", "rpm_urlnm", "base_urlnm", "Saugrohrmodell (512 kB layout)"),
+    TargetMap("PRGNM", "row_prgnm", "rpm_prgnm", "base_prgnm", "Saugrohrmodell (512 kB layout)"),
 ]
+"""A 1 MB ME7.5 (VVT, KFURL / KFPRG by cam, KFLDRQ0 / Q1 maps) carries the first set; a 512 kB one
+(06A906032S, SW 352760) has URLNM / PRGNM curves over rpm and LDRQ0DY / LDRQ1DY curves instead, and no
+KFPBRKNW. The maps of the other layout are reported missing and the generators take what is there."""
 
 
 # ---- generator wrappers: read the preset, call the pure math ------------------
@@ -247,35 +255,45 @@ def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
 
 
 Q_MAPS = ("KFLDRQ0", "KFLDRQ1", "KFLDRQ2")
+Q_CURVES = ("LDRQ0DY", "LDRQ1DY", "LDRQ1ST")
+PID_LAYOUTS = {
+    "KFLDRQ0": ("KFLDRQ0", "KFLDRQ1", "KFLDRQ2", "LDRQ1ST"),
+    "LDRQ0DY": ("LDRQ0DY", "LDRQ1DY", "LDRQ1ST", "KFLDRQ2"),
+}
+"""The maps each layout expects, keyed by its P map: 1 MB (maps) and 512 kB (curves)."""
 
 
 def _pid(ctx: RunContext):
-    """KFLDRQ0 / Q1 / Q2 and LDRQ1ST on the KFLDRL rpm axis (they share one ROM
-    axis); P from the boost sensitivity, or all three by the duty ratio."""
+    """The LDR PID gains on the KFLDRL rpm axis: KFLDRQ0 / Q1 / Q2 and LDRQ1ST
+    (one shared ROM axis), or in the 512 kB layout LDRQ0DY / LDRQ1DY / LDRQ1ST
+    (shared axis) and KFLDRQ2 (its own). P from the boost sensitivity, or all
+    gains by the duty ratio."""
     p = ctx.preset
     kfldrl = ctx.map("kfldrl")
     if kfldrl is None:
         ctx.messages.append("Boost PID: KFLDRL was not calculated, so there is no rpm axis to move the maps onto.")
         return []
-    q_maps = {}
+    q_maps, curves = {}, {}
     for name in Q_MAPS:
         key = name.lower()
         base, a_rpm, a_dev = p.base_map(f"base_{key}"), p.axis(f"rpm_{key}"), p.axis(f"x_{key}")
-        if base is None or a_rpm is None or a_dev is None:
-            ctx.messages.append(f"Boost PID: {name} not imported; it shares the rpm axis with KFLDRQ0, "
-                                "so it has to be moved onto the new axis by hand.")
-            continue
-        q_maps[name] = (base, a_rpm, a_dev)
-    ld, ld_rpm = p.base_map("base_ldrq1st"), p.axis("rpm_ldrq1st")
-    if ld is None or ld_rpm is None:
-        ctx.messages.append("Boost PID: LDRQ1ST not imported; it shares the rpm axis with KFLDRQ0, "
-                            "so it has to be moved onto the new axis by hand.")
+        if base is not None and a_rpm is not None and a_dev is not None:
+            q_maps[name] = (base, a_rpm, a_dev)
+    for name in Q_CURVES:
+        key = name.lower()
+        base, a_rpm = p.base_map(f"base_{key}"), p.axis(f"rpm_{key}")
+        if base is not None and a_rpm is not None:
+            curves[name] = (base, a_rpm)
+    layout = "KFLDRQ0" if "KFLDRQ0" in q_maps else "LDRQ0DY"
+    for name in PID_LAYOUTS[layout]:
+        if name not in q_maps and name not in curves:
+            ctx.messages.append(f"Boost PID: {name} not imported; if it shares the rpm axis with {layout}, "
+                                "it has to be moved onto the new axis by hand.")
     d = ctx.logs.wot
     mode = str(ctx.p("ldr_mode", "sensitivity"))
     spool = _spool(ctx, d)[0] if mode == "sensitivity" else None
     return _on_sheet(generate_pid_maps(
-        axis_rpm=np.asarray(kfldrl.y_axis, dtype=float), q_maps=q_maps,
-        ldrq1st=(ld, ld_rpm) if ld is not None and ld_rpm is not None else None, mode=mode,
+        axis_rpm=np.asarray(kfldrl.y_axis, dtype=float), q_maps=q_maps, curves=curves, mode=mode,
         logs_rpm=column(d, p.var("rpm")), logs_boost=column(d, p.var("boost")), logs_duty=column(d, p.var("wgdc")),
         spool_rpm=spool, kfldrl=kfldrl, factory_kfldrl=p.base_map("base_kfldrl"),
         factory_axis_rpm=p.axis("rpm_boost"), factory_axis_x=p.axis("kfldrl_x"),
@@ -332,8 +350,11 @@ def _ignition(ctx: RunContext):
 
 def _manifold(ctx: RunContext):
     """KFURL and KFPRG from the linear fit, then KFPBRK / KFPBRKNW from its residual
-    when the correction map axes were imported."""
+    when the correction map axes were imported. A file with URLNM / PRGNM in
+    place of KFURL / KFPRG goes to :func:`_manifold_curves`."""
     p = ctx.preset
+    if p.axis("rpm_url") is None and p.axis("rpm_urlnm") is not None:
+        return _manifold_curves(ctx)
     min_samples = float(ctx.p("min_samples", 1))
     vvt_enabled = bool(ctx.p("vvt_enabled", False))
     vvt_threshold = float(ctx.p("vvt_threshold", 18))
@@ -359,6 +380,114 @@ def _manifold(ctx: RunContext):
             messages=ctx.messages,
         )
     _kfprg_on_its_axis(maps, p.axis("rpm_url"), p.axis("rpm_prg"), ctx.messages)
+    return _on_sheet(maps, "Airflow")
+
+
+NM_PAD_STEP = 5.0
+"""URLNM / PRGNM hold 30 points; the 512 kB file fills the tail with 1 rpm steps after its last real point."""
+KFPBRK_LOAD_TOP = 400.0
+"""A KFPBRK load axis reaching past this is the unused default of the file, not a range anyone drives."""
+
+
+def real_points(axis) -> int:
+    """How many points of a curve axis come before the padding (steps of NM_PAD_STEP or less)."""
+    small = np.flatnonzero(np.diff(np.asarray(axis, dtype=float).ravel()) <= NM_PAD_STEP)
+    return int(small[0]) + 1 if small.size else int(np.asarray(axis).size)
+
+
+def _rpm_of_prgnm(axis_prg, axis_url, messages: list[str]):
+    """The rpm of each PRGNM point. The 512 kB map pack defines PRGNM's axis with
+    factor 0.1 and kg/h (280 .. 2400): the same bytes as URLNM's rpm axis, read
+    0.4 times too small. An axis proportional to URLNM's is taken as URLNM's."""
+    a, u = np.asarray(axis_prg, dtype=float).ravel(), np.asarray(axis_url, dtype=float).ravel()
+    if looks_like_rpm(a[: real_points(a)]):
+        return a
+    if a.size == u.size and np.all(u > 0):
+        ratio = a / u
+        if np.allclose(ratio, ratio[0], rtol=1e-3):
+            messages.append(f"  PRGNM: its axis in this export reads {a[0]:g} .. {a[real_points(a) - 1]:g} "
+                            f"(x {ratio[0]:.2f} of URLNM's rpm axis, the same data with a wrong factor in the map "
+                            "pack); its points are taken at URLNM's rpm.")
+            return u
+    messages.append("  PRGNM: its axis is neither rpm nor URLNM's, PRGNM not calculated.")
+    return None
+
+
+def _curve(fitted, fit_rpm, base, base_rpm, n_real: int) -> tuple[np.ndarray, int]:
+    """A paste-ready curve on ``base_rpm``: the fit where it has a value (linear in
+    rpm between fitted points), the file's value elsewhere, the padded tail equal
+    to the last real point. Returns the curve and how many real points came from the fit."""
+    fitted, fit_rpm = np.asarray(fitted, dtype=float).ravel(), np.asarray(fit_rpm, dtype=float).ravel()
+    base, base_rpm = np.asarray(base, dtype=float).ravel(), np.asarray(base_rpm, dtype=float).ravel()
+    out = base.copy()
+    ok = np.isfinite(fitted)
+    n_fit = 0
+    if ok.any():
+        inside = (base_rpm[:n_real] >= fit_rpm[ok].min()) & (base_rpm[:n_real] <= fit_rpm[ok].max())
+        out[:n_real][inside] = np.interp(base_rpm[:n_real][inside], fit_rpm[ok], fitted[ok])
+        n_fit = int(inside.sum())
+    out[n_real:] = out[n_real - 1]
+    return out, n_fit
+
+
+def _manifold_curves(ctx: RunContext):
+    """The manifold model of a 512 kB ME7.5 without cam-dependent maps: URLNM
+    (ps -> rl factor) and PRGNM (residual gas pressure), curves over rpm. The
+    line is fitted on URLNM's real points as KFURL / KFPRG are; points without
+    a fit keep the file's value. KFPBRK follows from the residual as usual."""
+    p = ctx.preset
+    msgs = ctx.messages
+    min_samples = float(ctx.p("min_samples", 1))
+    vvt_threshold = float(ctx.p("vvt_threshold", 18))
+    axis_url, base_url = p.axis("rpm_urlnm"), p.base_map("base_urlnm")
+    n_url = real_points(axis_url)
+    fit_rpm = np.asarray(axis_url, dtype=float)[:n_url]
+    fit = {m.key: m for m in generate_manifold_maps(
+        ctx.logs.full, p.vars, min_samples=min_samples, vvt_enabled=False, vvt_threshold=vvt_threshold,
+        axis_rpm=fit_rpm, fit_load_max=float(ctx.p("fit_load_max", 0)), messages=msgs)}
+    url_fit, prg_fit = fit["kfurl"].values[:, 0], fit["kfprg"].values[:, 0]
+    counts = fit["kfurl"].counts[:, 0]
+
+    maps = []
+    url, n_fit = _curve(url_fit, fit_rpm, base_url, axis_url, n_url)
+    msgs.append(f"  URLNM: {n_url} real points of {np.asarray(axis_url).size} ({fit_rpm[0]:g} .. {fit_rpm[-1]:g} rpm, "
+                f"the rest padding); {n_fit} from the logs, the others keep the file's value.")
+    maps.append(CalibrationMap("urlnm", "URLNM: ps -> rl factor by rpm (% / hPa, paste into WinOLS)", url,
+                               np.asarray(axis_url, dtype=float), ["URLNM"],
+                               counts=np.r_[counts, np.zeros(np.asarray(axis_url).size - n_url)],
+                               counts_title="URLNM / PRGNM - ROWS PER RPM POINT"))
+    prg_model = None
+    axis_prg, base_prg = p.axis("rpm_prgnm"), p.base_map("base_prgnm")
+    if axis_prg is None or base_prg is None:
+        msgs.append("  PRGNM not imported: KFPBRK uses the fitted residual gas pressure where it has one.")
+        prg_model = np.where(np.isfinite(prg_fit), prg_fit, np.nanmean(prg_fit) if np.isfinite(prg_fit).any() else 0.0)
+    else:
+        prg_rpm = _rpm_of_prgnm(axis_prg, axis_url, msgs)
+        if prg_rpm is not None:
+            n_prg = real_points(prg_rpm)
+            prg, n_fit = _curve(prg_fit, fit_rpm, base_prg, prg_rpm, n_prg)
+            msgs.append(f"  PRGNM: {n_fit} of {n_prg} real points from the logs, the others keep the file's value.")
+            maps.append(CalibrationMap("prgnm", "PRGNM: residual gas pressure by rpm (hPa, paste into WinOLS)", prg,
+                                       np.asarray(axis_prg, dtype=float), ["PRGNM"]))
+            prg_model = np.interp(fit_rpm, prg_rpm[:n_prg], prg[:n_prg])
+    url_model = np.interp(fit_rpm, np.asarray(axis_url, dtype=float)[:n_url], url[:n_url])
+
+    axis_rpm_pbrk, axis_load_pbrk = p.axis("rpm_pbrk"), p.axis("load_pbrk")
+    if axis_rpm_pbrk is None or axis_load_pbrk is None or prg_model is None:
+        msgs.append("  KFPBRK: its axes or the residual gas pressure are missing, correction map skipped.")
+    else:
+        base_pbrk = p.base_map("base_kfpbrk")
+        if float(np.max(axis_load_pbrk)) > KFPBRK_LOAD_TOP:
+            unity = base_pbrk is not None and bool(np.allclose(base_pbrk, 1.0))
+            msgs.append(f"  [WARNING] KFPBRK's axes in this file run to {np.max(axis_rpm_pbrk):g} rpm and "
+                        f"{np.max(axis_load_pbrk):g} % load{', all 1.0' if unity else ''}: the unused default, not a "
+                        "driven range. The correction below is on those axes; give KFPBRK real axes in WinOLS "
+                        "(e.g. 700 .. 6500 rpm, 50 .. 140 % load as in the 1 MB files) and import again.")
+        maps += generate_pbrk_maps(
+            ctx.logs.full, p.vars, kfurl=url_model[:, None], kfprg=prg_model[:, None], axis_rpm_fit=fit_rpm,
+            vvt_enabled=False, vvt_threshold=vvt_threshold, axis_rpm=axis_rpm_pbrk, axis_load=axis_load_pbrk,
+            base_map=base_pbrk, min_samples=min_samples, apply_to=str(ctx.p("pbrk_apply", "pressure")),
+            messages=msgs)
     return _on_sheet(maps, "Airflow")
 
 
@@ -408,29 +537,33 @@ def airflow_to_grams(df, preset, messages):
 
 
 def _apply_5120_scaling(ctx: RunContext, result: RunResult) -> None:
-    """With the 5120 hack on, logged pressures were doubled: KFURL doubles and KFPRG halves."""
+    """With the 5120 hack on, logged pressures were doubled: KFURL (URLNM) doubles and KFPRG (PRGNM) halves."""
     if not ctx.preset.prep.get("hack_5120", False):
         return
-    kfurl, kfprg = result.map("kfurl"), result.map("kfprg")
-    if kfurl is None or kfprg is None:
-        return
-    kfurl.values = np.asarray(kfurl.values) * 2.0
-    kfprg.values = np.asarray(kfprg.values) / 2.0
-    ctx.messages.append("  [INFO] 5120 Hack Enabled: KFURL multiplied by 2, KFPRG divided by 2.")
-    idx = next(i for i, r in enumerate(result.rows) if r.map_key == "kfurl")
-    result.rows.insert(idx, StatusRow("5120 Patch", "Applied", "KFURL*2, KFPRG/2"))
+    for url_key, prg_key in (("kfurl", "kfprg"), ("urlnm", "prgnm")):
+        url, prg = result.map(url_key), result.map(prg_key)
+        if url is None or prg is None:
+            continue
+        url.values = np.asarray(url.values) * 2.0
+        prg.values = np.asarray(prg.values) / 2.0
+        a, b = url_key.upper(), prg_key.upper()
+        ctx.messages.append(f"  [INFO] 5120 Hack Enabled: {a} multiplied by 2, {b} divided by 2.")
+        idx = next(i for i, r in enumerate(result.rows) if r.map_key == url_key)
+        result.rows.insert(idx, StatusRow("5120 Patch", "Applied", f"{a}*2, {b}/2"))
 
 
 GENERATORS = [
     GeneratorSpec("boost", "Boost Control (KFLDIMX / KFLDRL)", ("wot",), ("rpm_boost", "boost", "kfldrl_x"), _boost),
-    GeneratorSpec("pid", "Boost PID (KFLDRQ0 / Q1 / Q2 / LDRQ1ST on the KFLDRL axis)", ("wot",),
-                  ("rpm_boost", "kfldrl_x", "rpm_kfldrq0", "x_kfldrq0"), _pid, required_base_maps=("base_kfldrq0",)),
+    GeneratorSpec("pid", "Boost PID (KFLDRQ0 / Q1 / Q2 or LDRQ0DY / LDRQ1DY, LDRQ1ST on the KFLDRL axis)", ("wot",),
+                  ("rpm_boost", "kfldrl_x", ("rpm_kfldrq0", "rpm_ldrq0dy")), _pid,
+                  required_base_maps=(("base_kfldrq0", "base_ldrq0dy"),)),
     GeneratorSpec("handover", "Throttle Handover (KFVPDKSD)", ("wot",), ("rpm_kfvp", "pratio_kfvp"), _handover),
     GeneratorSpec("warmup", "Warmup Enrichment (KFFWL / KFFWLW)", ("warmup", "full"),
                   ("rpm_kffwlw", "load_kffwlw", "tmot"), _warmup),
     GeneratorSpec("fuel", "Fuel Trim (FKKVS)", ("hot",), ("rpm_fuel", "te"), _fuel),
     GeneratorSpec("ignition", "Ignition Timing (KFZW)", ("full",), ("rpm_ign", "load_ign"), _ignition),
-    GeneratorSpec("manifold", "Intake Manifold Model (KFURL / KFPRG / KFPBRK)", ("full",), ("rpm_url",), _manifold),
+    GeneratorSpec("manifold", "Intake Manifold Model (KFURL / KFPRG or URLNM / PRGNM, KFPBRK)", ("full",),
+                  (("rpm_url", "rpm_urlnm"),), _manifold),
     GeneratorSpec("maf", "MAF Check (ml_w vs reference VE, KFKHFM axes, information only)", ("full",),
                   ("rpm_kfkhfm", "load_kfkhfm"), _maf_check),
 ]
