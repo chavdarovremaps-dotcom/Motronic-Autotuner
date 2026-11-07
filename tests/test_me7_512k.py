@@ -64,13 +64,15 @@ def test_pid_on_the_512k_layout():
     assert q2.y_axis.tolist() == Q2_RPM.tolist() and "own rpm axis" in q2.title
     np.testing.assert_allclose(q2.values, preset.base_maps["base_kfldrq2"])
     assert any("rounded to them" in m for m in result.messages)
-    assert any("LDRQ0S" in m for m in result.messages)
+    assert any("LDRQ0S" in m and "left as it is" in m for m in result.messages)
     assert not any("KFLDRQ0 not imported" in m for m in result.messages)
 
 
 def test_pid_ratio_mode_scales_the_curves_and_the_own_axis_map():
     preset = pid_512k_preset()
     preset.params["ldr_mode"] = "overall"
+    preset.axes.update({"row_ldrq0s": np.array([0.0]), "col_ldrq0s": np.array([0.0])})
+    preset.base_maps["base_ldrq0s"] = np.array([[2.0]])
     data = forced_duty_log(n=20000)
     logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
     first = BOSCH_ME7.run_all(preset, logs)
@@ -81,7 +83,7 @@ def test_pid_ratio_mode_scales_the_curves_and_the_own_axis_map():
     axis = result.map("rpm_axis_ldrq").values
     np.testing.assert_allclose(result.map("ldrq0dy_corrected").values,
                                np.interp(axis, PID_RPM, np.linspace(75, 19, 16)) * 0.25, rtol=0.03)
-    assert any("multiply it by 0.25" in m for m in result.messages)
+    np.testing.assert_allclose(result.map("ldrq0s_corrected").values, [0.5], rtol=0.03)   # the stationary P too
 
 
 def manifold_512k_preset():

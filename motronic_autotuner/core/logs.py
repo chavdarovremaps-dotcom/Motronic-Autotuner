@@ -9,6 +9,7 @@ pedal test; the GUI's ``>=`` is used here.
 
 from __future__ import annotations
 
+import difflib
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -203,6 +204,34 @@ def hack_5120(df: pd.DataFrame, preset: Preset, messages: list[str]) -> pd.DataF
     return df
 
 
+SPLIT_CHANNELS = {"rpm", "pedal", "tmot", "time"}
+"""Channels the ingest itself splits and filters on; one missing turns the warning into a pop-up."""
+
+
+def _stem(name: str) -> str:
+    n = name.strip().lower()
+    return n[:-2] if n.endswith("_w") else n
+
+
+def similar_columns(name: str, columns) -> list[str]:
+    """The log column whose name is closest to ``name``, the ``_w`` word suffix ignored:
+    nmot for nmot_w, rl for rl_w, pvdkds_w for pvdks_w, pus_w for pu, tmot for tmotlin."""
+    by_stem: dict[str, str] = {}
+    for c in columns:
+        by_stem.setdefault(_stem(str(c)), str(c))
+    return [by_stem[s] for s in difflib.get_close_matches(_stem(name), list(by_stem), n=1, cutoff=0.7)]
+
+
+def missing_channel_warning(missing: dict[str, str], columns) -> str:
+    """One line for the channels set on the profile tab that the logs do not have."""
+    parts = []
+    for key, name in missing.items():
+        near = similar_columns(name, columns)
+        parts.append(f"{key} = {name}" + (f" (the logs have {', '.join(near)})" if near else ""))
+    return ("Channels set on the ECU Profile tab that are not in the logs: " + "; ".join(parts)
+            + ". Set the names the logger used there, or the maps that need them are skipped.")
+
+
 def process_raw_logs(
     folder: str | Path,
     preset: Preset,
@@ -232,6 +261,8 @@ def process_raw_logs(
 
     pedal_col, rpm_col = preset.var("pedal"), preset.var("rpm")
     temp_col, time_col = preset.var("tmot"), preset.var("time")
+    missing: dict[str, str] = {}
+    seen_columns: set[str] = set()
 
     for path in files:
         try:
@@ -254,6 +285,10 @@ def process_raw_logs(
             continue
 
         cols = set(df.columns)
+        seen_columns |= {str(c) for c in cols}
+        for key, name in preset.vars.items():
+            if name and name not in cols:
+                missing.setdefault(key, name)
         if settings.transient_filter:
             if {time_col, rpm_col, pedal_col} <= cols:
                 keep = transient_mask(
@@ -264,7 +299,8 @@ def process_raw_logs(
                 df = df[keep].reset_index(drop=True)
                 log.append(f"  -> [FILTER] {path.name}: Removed {removed} transient rows.")
             else:
-                log.append(f"  -> [WARNING] {path.name}: Missing required columns. Skipping filter.")
+                absent = ", ".join(c for c in (time_col, rpm_col, pedal_col) if c not in cols)
+                log.append(f"  -> [WARNING] {path.name}: {absent} not in this log, transient filter skipped.")
         else:
             log.append(f"  -> Loaded {path.name}: {len(df)} rows.")
 
@@ -295,4 +331,10 @@ def process_raw_logs(
     for name, frames in parts.items():
         if frames:
             setattr(out, name, pd.concat(frames, ignore_index=True))
+    missing = {k: v for k, v in missing.items() if v not in seen_columns}
+    if missing:
+        warning = missing_channel_warning(missing, sorted(seen_columns))
+        log.append(f"[WARNING] {warning}")
+        if set(missing) & SPLIT_CHANNELS:  # the split itself is wrong: say it loudly
+            out.warnings.append(warning)
     return out

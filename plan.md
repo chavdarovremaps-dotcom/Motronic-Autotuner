@@ -174,6 +174,32 @@ family means one `TargetMap` line and one generator wrapper.
     4850 rpm at a 60 % share, 5500 rpm at 90 %. The 82-91 % duties make
     1060-1200 hPa from 2750-3000 rpm. The user's decision (2026-11-06):
     leave the detection as it is; this car is the exception.
+- ME7.1, Audi 2.7 biturbo (8D0907551M, HW 0261207143, SW 360857, 1 MB;
+  `...\_Files\audi a4 2.7biturbo 1200cc, k04 turbo\`, 2026-11-07). Same
+  ME7 app.
+  - Boost PID: the curve layout of the 512 kB ME7.5 (LDRQ0DY, LDRQ1DY,
+    LDRQ1ST, LDRQ0S). KFLDRQ2 is 4 x 8 with rpm on X (1000 .. 6000) and
+    deviation 0 / 300 / 500 / 700 hPa.
+  - Manifold model: the VVT maps of the 1 MB ME7.5 (KFURL / KFPRG /
+    KFPBRK / KFPBRKNW). KFURL / KFPRG have six cam columns (2, 18, 30.5,
+    41, 42, 43); only 2 / 18 / 30.5 are used (18 = 30.5), 41-43 are 0.
+    The app's cam-off column goes into 2, cam-on into 18 and 30.5. The
+    logged wnwi_w sits at about 0 or 20-22, so the 18 deg split fits.
+  - KFLDIMX x axis 600 .. 1400 hPa. KFZW, KFKHFM, FKKVS and KFFWLW have
+    byte axes. KFLDRL / KFLDIMX share the rpm axis as on the 1.8T.
+  - The first export had KFKHFM in WinOLS's percent-difference view. That
+    export carries bPercent = 1 on the map, so the importer refuses such a
+    map ("Percent view"). bDelta = 1 is a property of the delta maps
+    (DZW, KFLURB ...), not a view.
+  - The log channels differ from the 1.8T: nmot, rl (bytes), pvdkds_w,
+    pus_w and tmot instead of nmot_w, rl_w, pvdks_w, pu and tmotlin. There
+    is no ml_w (mshfm_w is in g/s). There are two banks: frm2_w / fra2_w,
+    dwkrz_0..5 and wnwi2_w. Ingest names every configured channel a log
+    lacks together with its closest log column; it pops up only when a
+    split channel (rpm, pedal, tmot, time) is missing.
+  - The optional vars stft2 / ltft2 (bank 2) are averaged with bank 1 at
+    ingest; the two banks differ by 3 % (frm 0.976 against 0.947).
+  - Displacement 2671 cc for the MAF check.
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
   Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
   the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)

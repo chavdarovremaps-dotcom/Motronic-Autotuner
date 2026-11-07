@@ -30,6 +30,8 @@ DEFAULT_VARS = {
     "inj": "tevfakge_w",
     "stft": "frm_w",
     "ltft": "fra_w",
+    "stft2": "",
+    "ltft2": "",
     "tmot": "tmotlin",
     "pu": "pu",
     "knock": "wkrm",
@@ -49,6 +51,8 @@ VAR_LABELS = {
     "inj": "Injector on-time",
     "stft": "Short term trim",
     "ltft": "Long term trim",
+    "stft2": "Short term trim, bank 2 (V6: frm2_w, averaged with bank 1; empty = one bank)",
+    "ltft2": "Long term trim, bank 2 (V6: fra2_w, averaged with bank 1; empty = one bank)",
     "tmot": "Coolant temp",
     "pu": "Ambient pressure",
     "knock": "Knock retard",
@@ -177,8 +181,9 @@ TARGET_MAPS = [
     TargetMap("KFLDRQ1", "rpm_kfldrq1", "x_kfldrq1", "base_kfldrq1", "Boost PID"),
     TargetMap("KFLDRQ2", "rpm_kfldrq2", "x_kfldrq2", "base_kfldrq2", "Boost PID"),
     TargetMap("LDRQ1ST", "row_ldrq1st", "rpm_ldrq1st", "base_ldrq1st", "Boost PID"),
-    TargetMap("LDRQ0DY", "row_ldrq0dy", "rpm_ldrq0dy", "base_ldrq0dy", "Boost PID (512 kB layout)"),
-    TargetMap("LDRQ1DY", "row_ldrq1dy", "rpm_ldrq1dy", "base_ldrq1dy", "Boost PID (512 kB layout)"),
+    TargetMap("LDRQ0DY", "row_ldrq0dy", "rpm_ldrq0dy", "base_ldrq0dy", "Boost PID (curve layout)"),
+    TargetMap("LDRQ0S", "row_ldrq0s", "col_ldrq0s", "base_ldrq0s", "Boost PID (curve layout)"),
+    TargetMap("LDRQ1DY", "row_ldrq1dy", "rpm_ldrq1dy", "base_ldrq1dy", "Boost PID (curve layout)"),
     TargetMap("FKKVS", "rpm_fuel", "te", "base_fkkvs", "Fueling"),
     TargetMap("KFKHFM", "rpm_kfkhfm", "load_kfkhfm", "base_kfkhfm", "MAF Check"),
     TargetMap("KFFWLW", "rpm_kffwlw", "load_kffwlw", "base_kffwlw", "Warmup Enrichment"),
@@ -188,12 +193,14 @@ TARGET_MAPS = [
     TargetMap("KFPBRKNW", "rpm_pbrknw", "load_pbrknw", "base_kfpbrknw", "Saugrohrmodell"),
     TargetMap("KFPRG", "rpm_prg", "vvt_prg", "base_kfprg", "Saugrohrmodell"),
     TargetMap("KFURL", "rpm_url", "vvt_url", "base_kfurl", "Saugrohrmodell"),
-    TargetMap("URLNM", "row_urlnm", "rpm_urlnm", "base_urlnm", "Saugrohrmodell (512 kB layout)"),
-    TargetMap("PRGNM", "row_prgnm", "rpm_prgnm", "base_prgnm", "Saugrohrmodell (512 kB layout)"),
+    TargetMap("URLNM", "row_urlnm", "rpm_urlnm", "base_urlnm", "Saugrohrmodell (curve layout)"),
+    TargetMap("PRGNM", "row_prgnm", "rpm_prgnm", "base_prgnm", "Saugrohrmodell (curve layout)"),
 ]
 """A 1 MB ME7.5 (VVT, KFURL / KFPRG by cam, KFLDRQ0 / Q1 maps) carries the first set; a 512 kB one
 (06A906032S, SW 352760) has URLNM / PRGNM curves over rpm and LDRQ0DY / LDRQ1DY curves instead, and no
-KFPBRKNW. The maps of the other layout are reported missing and the generators take what is there."""
+KFPBRKNW. The ME7.1 of the 2.7 biturbo (8D0907551M, SW 360857) mixes them: the PID curves of the 512 kB
+file, the KFURL / KFPRG / KFPBRK / KFPBRKNW of the 1 MB one. The maps of the other layout are reported
+missing and the generators take what is there."""
 
 
 # ---- generator wrappers: read the preset, call the pure math ------------------
@@ -260,14 +267,14 @@ PID_LAYOUTS = {
     "KFLDRQ0": ("KFLDRQ0", "KFLDRQ1", "KFLDRQ2", "LDRQ1ST"),
     "LDRQ0DY": ("LDRQ0DY", "LDRQ1DY", "LDRQ1ST", "KFLDRQ2"),
 }
-"""The maps each layout expects, keyed by its P map: 1 MB (maps) and 512 kB (curves)."""
+"""The maps each layout expects, keyed by its P map: maps (1 MB ME7.5) and curves (512 kB ME7.5, ME7.1)."""
 
 
 def _pid(ctx: RunContext):
     """The LDR PID gains on the KFLDRL rpm axis: KFLDRQ0 / Q1 / Q2 and LDRQ1ST
-    (one shared ROM axis), or in the 512 kB layout LDRQ0DY / LDRQ1DY / LDRQ1ST
-    (shared axis) and KFLDRQ2 (its own). P from the boost sensitivity, or all
-    gains by the duty ratio."""
+    (one shared ROM axis), or in the curve layout LDRQ0DY / LDRQ1DY / LDRQ1ST
+    (shared axis), the single LDRQ0S and KFLDRQ2 (its own axis). P from the
+    boost sensitivity, or all gains by the duty ratio."""
     p = ctx.preset
     kfldrl = ctx.map("kfldrl")
     if kfldrl is None:
@@ -292,8 +299,10 @@ def _pid(ctx: RunContext):
     d = ctx.logs.wot
     mode = str(ctx.p("ldr_mode", "sensitivity"))
     spool = _spool(ctx, d)[0] if mode == "sensitivity" else None
+    q0s = p.base_map("base_ldrq0s")
     return _on_sheet(generate_pid_maps(
         axis_rpm=np.asarray(kfldrl.y_axis, dtype=float), q_maps=q_maps, curves=curves, mode=mode,
+        ldrq0s=float(np.asarray(q0s, dtype=float).ravel()[0]) if q0s is not None else None,
         logs_rpm=column(d, p.var("rpm")), logs_boost=column(d, p.var("boost")), logs_duty=column(d, p.var("wgdc")),
         spool_rpm=spool, kfldrl=kfldrl, factory_kfldrl=p.base_map("base_kfldrl"),
         factory_axis_rpm=p.axis("rpm_boost"), factory_axis_x=p.axis("kfldrl_x"),
@@ -536,6 +545,22 @@ def airflow_to_grams(df, preset, messages):
     return df
 
 
+def average_banks(df, preset, messages):
+    """Ingest hook: on an engine with two banks (2.7 biturbo) the trims of bank 2 are
+    named on the profile tab, and the trims become the mean of both banks: FKKVS and
+    the warm-up maps are common to both."""
+    for one, two in (("stft", "stft2"), ("ltft", "ltft2")):
+        a, b = preset.var(one), preset.var(two)
+        if not b:
+            continue
+        if a in df.columns and b in df.columns:
+            df[a] = (df[a] + df[b]) / 2.0
+            messages.append(f"  -> {a} and {b} averaged (bank 1 and 2).")
+        else:
+            messages.append(f"  -> [WARNING] {b} set as bank 2 of {a}, but the log lacks one of them: bank 1 only.")
+    return df
+
+
 def _apply_5120_scaling(ctx: RunContext, result: RunResult) -> None:
     """With the 5120 hack on, logged pressures were doubled: KFURL (URLNM) doubles and KFPRG (PRGNM) halves."""
     if not ctx.preset.prep.get("hack_5120", False):
@@ -575,7 +600,7 @@ BOSCH_ME7 = Family(
     var_labels=VAR_LABELS,
     params=PARAMS,
     target_maps=TARGET_MAPS,
-    log_sources=[LogSource("me7_logger", "ME7-Logger / TunerPro CSV", hooks=(hack_5120, airflow_to_grams))],
+    log_sources=[LogSource("me7_logger", "ME7-Logger / TunerPro CSV", hooks=(hack_5120, airflow_to_grams, average_banks))],
     generators=GENERATORS,
     post_process=[_apply_5120_scaling],
     default_prep=DEFAULT_PREP,

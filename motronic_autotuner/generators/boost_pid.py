@@ -20,7 +20,8 @@ for the tuner to set by hand.
 The older rule, scaling all three gains by the ratio of the duty the logs
 need over the duty the file holds (read from KFLDRL), stays as a choice.
 
-The 512 kB ME7.5 files (06A906032S, SW 352760) have the older LDR layout:
+The 512 kB ME7.5 files (06A906032S, SW 352760) and the ME7.1 of the 2.7
+biturbo (8D0907551M, SW 360857) have the older LDR layout:
 P and I are curves over rpm, LDRQ0DY and LDRQ1DY (dynamic), next to the
 stationary LDRQ1ST curve and LDRQ0S, a single stationary P; the three
 curves share one rpm axis, and KFLDRQ2 has 8 rpm points of its own. The
@@ -212,13 +213,15 @@ def _same_axis(a, b) -> bool:
 def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]],
                       mode: str, ldrq1st: tuple[np.ndarray, np.ndarray] | None = None,
                       curves: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
+                      ldrq0s: float | None = None,
                       logs_rpm=None, logs_boost=None, logs_duty=None, spool_rpm: float | None = None,
                       kfldrl: CalibrationMap | None = None, factory_kfldrl=None, factory_axis_rpm=None,
                       factory_axis_x=None, min_samples: float = MIN_LEVEL_SAMPLES, min_step: float = MIN_DUTY_STEP,
                       min_file_duty: float = MIN_FILE_DUTY, messages: list[str] | None = None) -> list[CalibrationMap]:
     """``q_maps`` maps "KFLDRQ0" / "KFLDRQ1" / "KFLDRQ2" to ``(base, axis_rpm, axis_deviation)``;
     ``curves`` maps "LDRQ0DY" / "LDRQ1DY" / "LDRQ1ST" to ``(base, axis_rpm)`` (``ldrq1st`` is the same
-    as a curve). P goes into KFLDRQ0, or into LDRQ0DY in the 512 kB layout.
+    as a curve). P goes into KFLDRQ0, or into LDRQ0DY in the curve layout, where ``ldrq0s`` is the
+    stationary P (one value), scaled with the rest in the ratio modes and left as it is otherwise.
 
     The maps on the P map's rpm axis move onto ``axis_rpm`` (snapped to the file's 40 rpm steps);
     a map with an rpm axis of its own keeps it and is only scaled in the ratio modes.
@@ -255,6 +258,7 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
             out[name] = [np.asarray(base, dtype=float).ravel(), None, np.asarray(a_rpm, dtype=float).ravel(), False]
     how = {name: ("same values on the KFLDRL axis" if o[3] else "own rpm axis, unchanged") for name, o in out.items()}
     on_shared = [name for name in out if out[name][3]]
+    maps_after: list[CalibrationMap] = []
     maps = [axis_block("rpm_axis_ldrq", f"{' / '.join(on_shared) or 'PID'} RPM axis (paste into WinOLS)",
                        axis_rpm, "RPM")]
     corner = "RPM \\ Deviation hPa"
@@ -283,8 +287,8 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                 f"{spool_rpm:g} rpm, the points below it take the first P after it." if spool_rpm is not None else
                 f"Boost PID: P ({p_name}) from the logs at {sum(from_logs)} of {axis_rpm.size} rpm points.")
             if old_layout:
-                messages.append("Boost PID: LDRQ0S, the stationary P (one value), is not in the export and is left "
-                                "as it is.")
+                held = f" ({ldrq0s:g} in the file)" if ldrq0s is not None else ""
+                messages.append(f"Boost PID: LDRQ0S, the stationary P (one value){held}, is left as it is.")
             maps.append(CalibrationMap(
                 "ldr_sensitivity", "Boost sensitivity and P per rpm", np.vstack([
                     res["rise"], res["low"], res["high"], res["p_raw"], res["p_used"], file_p]),
@@ -317,8 +321,12 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                 messages.append(f"Boost PID: the logs need {ratio['overall']:.3f} of the duty in the file "
                                 f"({int(ratio['cells'].sum())} KFLDRL cells); {', '.join(out)} scaled "
                                 f"{'per rpm' if mode == 'per_rpm' else 'by that ratio'}.")
-                if old_layout:
-                    messages.append(f"Boost PID: LDRQ0S, the stationary P (one value), is not in the export: "
+                if old_layout and ldrq0s is not None:
+                    maps_after.append(CalibrationMap(
+                        "ldrq0s_corrected", f"LDRQ0S (x {ratio['overall']:.3f}, paste into WinOLS)",
+                        np.array([ldrq0s * ratio["overall"]]), np.array([0.0]), ["LDRQ0S"]))
+                elif old_layout:
+                    messages.append(f"Boost PID: LDRQ0S, the stationary P (one value), was not imported: "
                                     f"multiply it by {ratio['overall']:.3f} by hand.")
                 maps.append(CalibrationMap(
                     "ldr_scale", f"LDR PID scale: duty from the logs over duty in the file (overall {ratio['overall']:.3f})",
@@ -336,4 +344,4 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
             values, _, a_rpm, _ = out[name]
             maps.append(CalibrationMap(f"{name.lower()}_corrected", f"{name} ({how[name]}, paste into WinOLS)",
                                        values, a_rpm, [name]))
-    return maps
+    return maps + maps_after

@@ -46,6 +46,8 @@ STATUS_MISMATCH = "Axis Size Mismatch"
 STATUS_MATRIX_ERROR = "Matrix Error"
 STATUS_EMPTY = "Empty Data"
 STATUS_MISSING = "Missing"
+STATUS_PERCENT_VIEW = "Percent view: export it again in the normal view"
+"""WinOLS wrote the map as the percent difference to the original (bPercent 1), not its values."""
 
 OK_STATUSES = {STATUS_LOADED, STATUS_DIRECT, STATUS_FROM_JSON, STATUS_FLIPPED, STATUS_TRANSPOSED}
 
@@ -207,6 +209,10 @@ def _extract(parts: list[str], t: TargetMap, result: ImportResult, status: MapSt
     except ValueError:
         status.status = STATUS_MATRIX_ERROR
         return
+    percent = header.get("bPercent")
+    if percent is not None and percent < len(parts) and parts[percent].strip() == "1":
+        status.status = STATUS_PERCENT_VIEW
+        return
     z = _numbers(parts[-3])
     x = _numbers(parts[-2])
     y = _numbers(parts[-1])
@@ -218,6 +224,8 @@ def _extract(parts: list[str], t: TargetMap, result: ImportResult, status: MapSt
         num_cols, num_rows = x.size, 1
     if y.size == 0 and num_rows == 1:
         y = np.array([0.0])
+    if x.size == 0 and num_cols == 1 and z.size == 1:  # a single value (LDRQ0S): a 1 x 1 map
+        x = np.array([0.0])
     if x.size == 0 or y.size == 0 or z.size == 0:
         status.status = STATUS_EMPTY
         return

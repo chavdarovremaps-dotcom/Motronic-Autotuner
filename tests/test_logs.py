@@ -110,3 +110,46 @@ def test_foreign_csv_in_the_folder_is_reported_not_fatal(tmp_path):
     logs = process_raw_logs(tmp_path, BOSCH_ME7.default_preset(), IngestSettings())
     assert logs.counts()["full"] == 30
     assert any("[SKIP] WinOLS(Audi A3).bin.csv" in m for m in logs.messages)
+
+
+def write_named_log(path, columns: dict[str, float], n=30):
+    """An ME7-Logger file with the given channels held at fixed values (time and rpm ramp)."""
+    names = ["TimeStamp"] + list(columns)
+    rows = [", ".join(names), ", ".join(["sec.ms"] + ["-"] * len(columns))]
+    for i in range(n):
+        vals = [f"{i * 0.1:.3f}"] + [f"{(v + i * 10) if k in ('nmot', 'nmot_w') else v}" for k, v in columns.items()]
+        rows.append(",".join(vals))
+    path.write_text("\n".join(rows) + "\n", encoding="latin-1")
+
+
+def test_missing_channels_are_named_with_the_closest_log_column(tmp_path):
+    # the 2.7 biturbo (ME7.1) logs nmot, rl, pvdkds_w, pus_w and tmot where the 1.8T has nmot_w, rl_w, pvdks_w, pu, tmotlin
+    write_named_log(tmp_path / "bt.csv", {"nmot": 3000, "rl": 120, "wdkba": 99, "tmot": 90, "pvdkds_w": 1800,
+                                          "pus_w": 980, "ldtvm": 45})
+    preset = BOSCH_ME7.default_preset()
+    logs = BOSCH_ME7.ingest(tmp_path, preset)
+    text = " ".join(logs.warnings)
+    for expected in ("rpm = nmot_w (the logs have nmot)", "load = rl_w (the logs have rl)",
+                     "boost = pvdks_w (the logs have pvdkds_w)", "pu = pu (the logs have pus_w)",
+                     "tmot = tmotlin (the logs have tmot)"):
+        assert expected in text
+    assert any("nmot_w not in this log, transient filter skipped" in m for m in logs.messages)
+
+
+def test_missing_optional_channels_are_reported_without_a_pop_up(tmp_path):
+    write_me7_log(tmp_path / "log1.csv", n=30)
+    logs = BOSCH_ME7.ingest(tmp_path, BOSCH_ME7.default_preset())
+    assert logs.warnings == [] and any("knock = wkrm" in m for m in logs.messages)
+
+
+def test_trims_of_both_banks_are_averaged(tmp_path):
+    write_named_log(tmp_path / "bt.csv", {"nmot_w": 3000, "wdkba": 99, "tmotlin": 90, "frm_w": 0.98, "frm2_w": 0.94,
+                                          "fra_w": 1.0, "fra2_w": 1.04})
+    preset = BOSCH_ME7.default_preset()
+    preset.vars.update({"stft2": "frm2_w", "ltft2": "fra2_w"})
+    logs = BOSCH_ME7.ingest(tmp_path, preset)
+    np.testing.assert_allclose(logs.full["frm_w"], 0.96)
+    np.testing.assert_allclose(logs.full["fra_w"], 1.02)
+    assert any("frm_w and frm2_w averaged" in m for m in logs.messages)
+    preset.vars["stft2"] = ""
+    np.testing.assert_allclose(BOSCH_ME7.ingest(tmp_path, preset).full["frm_w"], 0.98)   # one bank: untouched

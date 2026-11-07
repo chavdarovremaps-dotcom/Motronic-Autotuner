@@ -215,3 +215,18 @@ def test_curve_with_its_axis_on_y_reads_as_a_curve(tmp_path):
     assert r.rows[0].ok and r.rows[0].dims == "1 x 30"
     assert r.axes["rpm_urlnm"].tolist() == [float(v) for v in rpm] and r.axes["row_urlnm"].tolist() == [0.0]
     assert r.base_maps["base_urlnm"].shape == (1, 30)
+
+
+def test_a_map_exported_in_the_percent_view_is_not_loaded(tmp_path):
+    parts = line64("KFKHFM", 2, 2, [0, 1.5, -0.7, 0], [9.75, 20.25], [720, 1000], x_unit="%", y_unit="Upm").split(";")
+    parts[10] = "1"                                                   # bPercent: percent difference to the original
+    path = write(tmp_path, HEADER64, ";".join(parts))
+    r = parse_export(path, [TargetMap("KFKHFM", "rpm_kfkhfm", "load_kfkhfm", "base_kfkhfm", "MAF")])
+    assert r.rows[0].status == winols.STATUS_PERCENT_VIEW and not r.rows[0].ok
+    assert "base_kfkhfm" not in r.base_maps
+
+
+def test_a_single_value_reads_as_a_one_by_one_map(tmp_path):
+    path = write(tmp_path, HEADER64, line64("LDRQ0S", 1, 1, [2.0], [], [], map_type="eEinzel"))
+    r = parse_export(path, [TargetMap("LDRQ0S", "row_ldrq0s", "col_ldrq0s", "base_ldrq0s", "PID")])
+    assert r.rows[0].ok and r.base_maps["base_ldrq0s"].tolist() == [[2.0]]
