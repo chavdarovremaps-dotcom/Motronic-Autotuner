@@ -60,6 +60,24 @@ class LogSource:
 
 
 @dataclass(frozen=True)
+class ChannelPreset:
+    """A named set of logger channel names for one engine or logger setup, applied on the profile tab.
+    Channels it does not name take the family default, so switching presets never leaves one behind."""
+
+    label: str
+    vars: dict[str, str]
+    pressure_columns: tuple[str, ...] = ()
+    """The 5120 hack's pressure columns under this setup's names; empty keeps the family default."""
+
+    def applied(self, family: "Family") -> tuple[dict[str, str], list[str]]:
+        """The full channel mapping and pressure column list this preset gives in ``family``."""
+        mapping = dict(family.default_vars)
+        mapping.update(self.vars)
+        columns = list(self.pressure_columns) or list(family.default_prep.get("pressure_columns", []))
+        return mapping, columns
+
+
+@dataclass(frozen=True)
 class FileInput:
     key: str
     """Stored under ``preset.files[key]``."""
@@ -200,6 +218,8 @@ class Family:
     post_process: list[PostProcess] = field(default_factory=list)
     """Run after all generators, e.g. the 5120 scaling of KFURL and KFPRG."""
     ingest_checks: list[IngestCheck] = field(default_factory=list)
+    channel_presets: list[ChannelPreset] = field(default_factory=list)
+    """Logger channel name sets offered on the profile tab next to the family defaults."""
     extra_tabs: list[type] = field(default_factory=list)
     default_prep: dict[str, Any] = field(default_factory=dict)
     show_pressure_hack: bool = True

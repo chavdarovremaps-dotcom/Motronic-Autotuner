@@ -200,6 +200,13 @@ family means one `TargetMap` line and one generator wrapper.
   - The optional vars stft2 / ltft2 (bank 2) are averaged with bank 1 at
     ingest; the two banks differ by 3 % (frm 0.976 against 0.947).
   - Displacement 2671 cc for the MAF check.
+  - The channel names are a preset: "Channel names" on the profile tab
+    (Family.channel_presets, ChannelPreset). It holds the 1.8T defaults
+    or "Audi 2.7 biturbo (ME7.1, 8D0907551M)", plus the 5120 pressure
+    columns. maf = ml_w, which the user logs from the next logs on; the
+    2026-11-07 logs have mshfm_w only.
+  - The profile tab's channel fields take effect when a field is left.
+    Before this they were only read on save or map import.
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
   Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
   the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)

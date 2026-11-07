@@ -74,9 +74,25 @@ class ProfileTab(QWidget):
 
         vars_box = QGroupBox("Logger Variable Mapping")
         vf = QFormLayout(vars_box)
+        if self.family.channel_presets:
+            row = QHBoxLayout()
+            self.channel_combo = QComboBox()
+            self.channel_combo.addItem(f"{self.family.display_name} defaults", -1)
+            for i, preset in enumerate(self.family.channel_presets):
+                self.channel_combo.addItem(preset.label, i)
+            self.btn_channels = QPushButton("Apply")
+            self.btn_channels.setToolTip("Fill the channel names (and the 5120 pressure columns) of this setup; "
+                                         "the other fields stay as they are.")
+            self.btn_channels.clicked.connect(self.on_apply_channels)
+            row.addWidget(self.channel_combo, 1)
+            row.addWidget(self.btn_channels)
+            vf.addRow("Channel names", row)
+        else:
+            self.channel_combo = None
         for key in self.family.default_vars:
             edit = QLineEdit()
             edit.setPlaceholderText(self.family.default_vars[key])
+            edit.editingFinished.connect(self.read_fields)  # a typed name counts without saving first
             self._var_edits[key] = edit
             vf.addRow(f"{self.family.var_labels.get(key, key)}  ({key})", edit)
         lv.addWidget(vars_box)
@@ -87,6 +103,7 @@ class ProfileTab(QWidget):
         self.chk_5120 = QCheckBox("5120 mbar hack (double pressure columns)")
         self.edit_pressure_cols = QLineEdit()
         self.edit_pressure_cols.setPlaceholderText("pvdks_w, pu, ps_w")
+        self.edit_pressure_cols.editingFinished.connect(self.read_fields)
         pf.addRow(self.chk_align)
         if self.family.show_pressure_hack:
             pf.addRow(self.chk_5120)
@@ -178,6 +195,21 @@ class ProfileTab(QWidget):
             p.files[key] = edit.text().strip()
         if self.source_combo is not None:
             p.log_source = self.source_combo.currentData()
+
+    def on_apply_channels(self) -> None:
+        """Fill the channel fields from the chosen set and take them into the profile."""
+        if self.channel_combo is None:
+            return
+        i = self.channel_combo.currentData()
+        if i is None or i < 0:
+            mapping = dict(self.family.default_vars)
+            columns = list(self.family.default_prep.get("pressure_columns", []))
+        else:
+            mapping, columns = self.family.channel_presets[i].applied(self.family)
+        for key, edit in self._var_edits.items():
+            edit.setText(mapping.get(key, ""))
+        self.edit_pressure_cols.setText(", ".join(columns))
+        self.read_fields()
 
     # ---- actions ------------------------------------------------------------
 

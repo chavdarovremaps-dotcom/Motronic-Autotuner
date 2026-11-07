@@ -17,7 +17,7 @@ from ..generators.handover import generate_handover_maps
 from ..generators.ignition import generate_kfzw
 from ..generators.manifold import generate_manifold_maps, generate_pbrk_maps
 from ..generators.warmup import generate_warmup_maps
-from .base import Family, GeneratorSpec, LogSource, ParamSpec, RunContext, RunResult, StatusRow
+from .base import ChannelPreset, Family, GeneratorSpec, LogSource, ParamSpec, RunContext, RunResult, StatusRow
 
 DEFAULT_VARS = {
     "rpm": "nmot_w",
@@ -51,8 +51,8 @@ VAR_LABELS = {
     "inj": "Injector on-time",
     "stft": "Short term trim",
     "ltft": "Long term trim",
-    "stft2": "Short term trim, bank 2 (V6: frm2_w, averaged with bank 1; empty = one bank)",
-    "ltft2": "Long term trim, bank 2 (V6: fra2_w, averaged with bank 1; empty = one bank)",
+    "stft2": "Short term trim, bank 2 (averaged; empty = one bank)",
+    "ltft2": "Long term trim, bank 2 (averaged; empty = one bank)",
     "tmot": "Coolant temp",
     "pu": "Ambient pressure",
     "knock": "Knock retard",
@@ -593,6 +593,19 @@ GENERATORS = [
                   ("rpm_kfkhfm", "load_kfkhfm"), _maf_check),
 ]
 
+CHANNEL_PRESETS = [
+    ChannelPreset(
+        "Audi 2.7 biturbo (ME7.1, 8D0907551M)",
+        {"rpm": "nmot", "load": "rl", "boost": "pvdkds_w", "pu": "pus_w", "tmot": "tmot", "maf": "ml_w",
+         "stft2": "frm2_w", "ltft2": "fra2_w"},
+        pressure_columns=("pvdkds_w", "pus_w", "plsol", "plsolr_w", "ps_w"),
+    ),
+]
+"""The defaults are the 1.8T (ME7.5) names. The ME7.1 logger definition names rpm, load, boost, ambient
+and coolant differently and logs both banks' trims; airflow is ml_w from the 2026-11-07 logs on (the
+first ones had mshfm_w only)."""
+
+
 BOSCH_ME7 = Family(
     key="bosch_me7",
     display_name="Bosch ME7",
@@ -605,4 +618,5 @@ BOSCH_ME7 = Family(
     post_process=[_apply_5120_scaling],
     default_prep=DEFAULT_PREP,
     excel_sheet="Boost",
+    channel_presets=CHANNEL_PRESETS,
 )
