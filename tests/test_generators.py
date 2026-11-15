@@ -6,7 +6,7 @@ import pytest
 
 from motronic_autotuner.core.logs import SplitLogs
 from motronic_autotuner.families.bosch_me7 import BOSCH_ME7, DEFAULT_VARS
-from motronic_autotuner.generators.boost import detect_spool_rpm, generate_boost_maps, spool_rpm_axis
+from motronic_autotuner.generators.boost import generate_boost_maps, spool_rpm_axis
 from motronic_autotuner.generators.boost_pid import p_from_sensitivity, rescale_rows, steepest_rise
 from motronic_autotuner.generators.handover import generate_kfvpdksd, generate_handover_maps, pratio_axis_from_curve
 from motronic_autotuner.generators.ignition import generate_kfzw
@@ -274,16 +274,6 @@ def test_spool_rpm_axis_layout():
     assert spool_rpm_axis(3000).tolist()[-1] == 7000 and spool_rpm_axis(3000).size == 16
 
 
-def test_detect_spool_rpm_from_the_wot_rows():
-    d = spool_log()
-    spool, info = detect_spool_rpm(d[V["rpm"]], d[V["boost"]] - 1000)
-    # 90 % of 1200 over ambient is reached 80 rpm before full boost: 3300 - 0.1 * 800 = 3220
-    assert 3150 <= spool <= 3300 and info["peak"] > 1100 and info["boost_at_spool"] >= info["target"]
-    assert spool_rpm_axis(spool)[4] == spool
-    none, info = detect_spool_rpm(d[V["rpm"]][:2], d[V["boost"]][:2])
-    assert none is None
-
-
 def test_pratio_axis_from_curve():
     axis = pratio_axis_from_curve(np.array([1200, 1500, np.nan, 1600.0]), 1000.0, 12)
     assert axis.size == 12 and axis[0] == 0.95 and axis[1] == 1.0 and axis[-1] == 1.92
@@ -323,13 +313,18 @@ def test_me7_auto_axes_land_in_the_result():
     preset.params.update({"auto_axis_kfldrl": True, "auto_axis_kfvp": True})
     data = spool_log()
     logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
+    # the spool rpm not set: the factory axis stays and the app says why
+    result = BOSCH_ME7.run_all(preset, logs)
+    assert result.map("rpm_axis_boost") is None and result.map("kfldrl").y_axis.tolist() == AXIS_RPM.tolist()
+    assert any("turbo spool rpm is not set" in m for m in result.messages)
+    preset.params["spool_rpm"] = 3300.0
     result = BOSCH_ME7.run_all(preset, logs)
     keys = [m.key for m in result.maps]
     assert keys[:5] == ["rpm_axis_boost", "kfldimx", "kfldrl", "kfldrl_finished", "abs_wgdc"] and "pratio_axis_kfvp" in keys
     axis = result.map("rpm_axis_boost").values
-    assert 3150 <= axis[4] <= 3300 and axis.tolist() == spool_rpm_axis(axis[4]).tolist() and axis[-1] % 500 == 0
+    assert axis.tolist() == spool_rpm_axis(3300).tolist() and axis[4] == 3300
     assert result.map("kfldrl").y_axis.tolist() == axis.tolist() == result.map("kfldimx").y_axis.tolist()
-    assert any("Auto axis KFLDRL / KFLDIMX: spool at" in m for m in result.messages)
+    assert any("Auto axis KFLDRL / KFLDIMX: spool at 3300 rpm (setting)" in m for m in result.messages)
 
 
 
@@ -384,6 +379,7 @@ def pid_preset():
 
 def test_me7_pid_p_from_the_boost_sensitivity():
     preset = pid_preset()
+    preset.params["spool_rpm"] = 3200.0
     data = forced_duty_log()
     logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
     result = BOSCH_ME7.run_all(preset, logs)
@@ -397,7 +393,8 @@ def test_me7_pid_p_from_the_boost_sensitivity():
     spool = [m for m in result.messages if "spool at" in m][0]
     first_after = np.flatnonzero(np.array(sens.values[3]) > 0)            # P from the logs
     assert (p_col[: first_after[0]] == p_col[first_after[0]]).all()        # below the spool: the first P after it
-    assert "the points below it take the first P after it" in spool
+    assert "spool at 3200 rpm, the points below it take the first P after it" in spool
+    assert (p_col[AXIS_RPM < 3200] == p_col[np.flatnonzero(AXIS_RPM >= 3200)[0]]).all()
     # I, D and LDRQ1ST: same values at the same rpm, on the new axis
     np.testing.assert_allclose(result.map("kfldrq1_corrected").values[:, 0], np.interp(AXIS_RPM, [1000, 3000, 6000], [80, 60, 40]))
     np.testing.assert_allclose(result.map("ldrq1st_corrected").values, np.interp(AXIS_RPM, [1000, 3000, 6000], [1, 2, 3]))

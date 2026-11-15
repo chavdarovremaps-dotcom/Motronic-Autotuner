@@ -99,8 +99,11 @@ family means one `TargetMap` line and one generator wrapper.
     - Column 0 is 0 %.
     - Rows rise with the target.
     - Holes are linear in boost.
-    - Spooled rows reach 90 % (the spool share) of the highest boost of any
-      row. Their unreached targets get the highest duty logged in those rows.
+    - Spooled rows start at the first axis point at or above the "Turbo
+      spool rpm" setting (without it: the rows that reach 90 % of the
+      highest boost of any row). Their unreached targets get the highest
+      duty logged in those rows; a spooled row without logs copies the
+      nearest spooled row.
     - The row just below the first spooled row takes that row's duties.
     - Rows further down get 95 %, with the first unreached cell bridged at
       the spool-side row's highest duty.
@@ -174,10 +177,10 @@ family means one `TargetMap` line and one generator wrapper.
   - Generators take either layout: GeneratorSpec axes and base maps can be
     any-of tuples.
   - Spool on this car: its hybrid turbo makes about 1000 hPa at 6000 rpm
-    even at 0 % duty, so the median-of-all-WOT-rows spool comes out late:
-    4850 rpm at a 60 % share, 5500 rpm at 90 %. The 82-91 % duties make
-    1060-1200 hPa from 2750-3000 rpm. The user's decision (2026-11-06):
-    leave the detection as it is; this car is the exception.
+    even at 0 % duty, so the median-of-all-WOT-rows spool came out late
+    (4850 rpm at a 60 % share, 5500 at 90 %) while the 82-91 % duties make
+    1060-1200 hPa from 2750-3000 rpm. Since 2026-11-15 the spool is a
+    setting (see Automatic axes).
 - ME7.1, Audi 2.7 biturbo (8D0907551M, HW 0261207143, SW 360857, 1 MB;
   `...\_Files\audi a4 2.7biturbo 1200cc, k04 turbo\`, 2026-11-07). Same
   ME7 app.
@@ -212,12 +215,19 @@ family means one `TargetMap` line and one generator wrapper.
   - The profile tab's channel fields take effect when a field is left.
     Before this they were only read on save or map import.
 - Automatic axes (ME7 set, 2026-10-29), each behind a tick in Boost &
-  Wastegate, default off. KFLDRL / KFLDIMX rpm axis: the spool point is
-  the lowest 50-rpm bin whose median relative boost reaches 90 % (parameter)
-  of the peak bin median, on all WOT rows (no duty condition: on the 032BJ
-  the modulated duty never passed 34 % and rose only above 6000 rpm); the
-  axis is spool - 1000 .. spool - 250, spool, + 250 .. + 1250, then 500
+  Wastegate, default off. KFLDRL / KFLDIMX rpm axis around the spool
+  point: spool - 1000 .. spool - 250, spool, + 250 .. + 1250, then 500
   steps snapped to multiples of 500 (3300 gives 2300 .. 4550, 5000 .. 7500).
+  - The spool point is the "Turbo spool rpm" setting (2026-11-15; 0 = not
+    set: no auto axis, P from every rpm point, the KFLDRL finish judges the
+    spool from the logs).
+  - It replaced a detection: the lowest 50-rpm bin whose median boost over
+    all WOT rows reached a share of the peak. Low-duty forced pulls dominate
+    that median: on the A4 G25-550 (5120 patch) 80 % gave 3550 rpm and 85 %
+    gave 4800. A highest-boost-duty-level variant fixed the S3 setups but
+    moved the 032BJ from 4700 to 5850. The user chose: "Simple is best."
+  - The same setting places the PID's below-spool points. The spool share
+    setting is gone; old profiles' spool_boost_share is ignored.
   KFVPDKSD ratio axis: 0.95, 1.0, then even steps to 1.2 x the base-WG peak
   ratio; rows under 1.2 keep the imported map's values at the same rpm.
   Both axes are written as one-row blocks on the Boost sheet.

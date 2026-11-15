@@ -9,7 +9,7 @@ from ..core.logs import hack_5120
 from ..core.maps import CalibrationMap
 from ..core.winols import TargetMap, looks_like_rpm
 from ..generators import axis_block, column
-from ..generators.boost import DUTY_OUT_OF_REACH, detect_spool_rpm, generate_boost_maps, spool_rpm_axis
+from ..generators.boost import DUTY_OUT_OF_REACH, generate_boost_maps, spool_rpm_axis
 from ..generators.boost_pid import MIN_DUTY_STEP, MIN_LEVEL_SAMPLES, generate_pid_maps
 from ..generators.fuel import generate_fkkvs
 from ..generators.maf_check import DEFAULT_MIN_THROTTLE, DEFAULT_VE, DISPLACEMENT_1_8T, generate_maf_check
@@ -102,14 +102,16 @@ PRESSURE_REFERENCE = [
               tip="Relative boost when CWLDIMX is off, and the reference of the KFVPDKSD pressure ratio."),
 ]
 KFLDRL = [
+    ParamSpec("spool_rpm", "Turbo spool rpm", "float", 0.0, section=BOOST, group="KFLDRL / KFLDIMX",
+              unit="rpm", decimals=0, minimum=0, maximum=10000,
+              tip="Where the turbo makes its boost at full duty, from your logs. The auto axis puts its 5th "
+                  "point here, the finished KFLDRL treats the rows from here up as spooled, and the PID points "
+                  "below it take the first P after it. 0 = not set: no auto axis, P from every rpm point, and "
+                  "the finish judges the spool from the logs (90 % of the highest boost of any row)."),
     ParamSpec("auto_axis_kfldrl", "Auto rpm axis around the spool", "bool", False, section=BOOST,
               group="KFLDRL / KFLDIMX",
-              tip="Rebuilds the KFLDRL / KFLDIMX rpm axis: 5th point at the spool rpm, 250 rpm steps to the "
-                  "10th point, 500 rpm steps after it."),
-    ParamSpec("spool_boost_share", "Spool: share of the peak boost", "float", 90.0, section=BOOST,
-              group="KFLDRL / KFLDIMX", unit="%", decimals=0, minimum=50, maximum=100,
-              tip="The spool is where the boost first reaches this share of the peak. Used by the auto axis, "
-                  "the KFLDRL finish and the PID."),
+              tip="Rebuilds the KFLDRL / KFLDIMX rpm axis: 5th point at the turbo spool rpm, 250 rpm steps to "
+                  "the 10th point, 500 rpm steps after it. Needs the turbo spool rpm."),
     ParamSpec("kfldrl_method", "Cells from", "choice", "rows", section=BOOST, group="KFLDRL / KFLDIMX",
               choices=(("Each rpm row between the logged duty levels", "rows"),
                        ("Bilinear splat (old)", "splat")),
@@ -210,19 +212,17 @@ def _on_sheet(maps, sheet: str):
     return maps
 
 
-def _spool(ctx: RunContext, d):
-    """Spool rpm of the WOT rows, relative boost against logged pu (CWLDIMX) or the ambient parameter."""
-    p = ctx.preset
-    ref = column(d, p.var("pu")) if bool(ctx.p("cwldimx", False)) else float(ctx.p("ambient_pressure", 1000))
-    return detect_spool_rpm(column(d, p.var("rpm")), column(d, p.var("boost")) - ref,
-                            share=float(ctx.p("spool_boost_share", 90)))
+def _spool(ctx: RunContext) -> float | None:
+    """The turbo spool rpm the tuner entered, or None when it is not set (0)."""
+    spool = float(ctx.p("spool_rpm", 0) or 0)
+    return spool if spool > 0 else None
 
 
 def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
            reference_label: str = "Target Rel Boost (mbar)", axis_boost=None, blocks=None):
     """KFLDIMX / KFLDRL, the calculated KFLDRL followed by the finished one; with
-    the auto-axis tick the rpm axis is rebuilt around the spool point found in
-    the WOT rows and written out as a block. A family without the KFLDRL
+    the auto-axis tick the rpm axis is rebuilt around the turbo spool rpm
+    setting and written out as a block. A family without the KFLDRL
     method setting keeps the splat. A family wrapper may pass its own WOT rows,
     the column the boost is measured from, a KFLDIMX axis and blocks to put
     first (ME7.6.2)."""
@@ -232,17 +232,14 @@ def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
     ambient = float(ctx.p("ambient_pressure", 1000))
     axis_rpm = p.axis("rpm_boost")
     blocks = list(blocks or [])
+    spool = _spool(ctx)
     if bool(ctx.p("auto_axis_kfldrl", False)):
-        spool, info = _spool(ctx, d)
         if spool is None:
-            ctx.messages.append(f"Auto axis KFLDRL: no spool point found in {info.get('rows', 0)} WOT rows, "
-                                "factory axis kept.")
+            ctx.messages.append("Auto axis KFLDRL: the turbo spool rpm is not set (0), factory axis kept.")
         else:
             axis_rpm = spool_rpm_axis(spool)
-            ctx.messages.append(
-                f"Auto axis KFLDRL / KFLDIMX: spool at {spool:.0f} rpm, where the median relative boost reaches "
-                f"{info['boost_at_spool']:.0f} hPa ({info['share']:g} % of the {info['peak']:.0f} hPa peak at "
-                f"{info['peak_rpm']:.0f} rpm, {info['rows']} WOT rows); axis {', '.join(f'{a:g}' for a in axis_rpm)}.")
+            ctx.messages.append(f"Auto axis KFLDRL / KFLDIMX: spool at {spool:g} rpm (setting); axis "
+                                f"{', '.join(f'{a:g}' for a in axis_rpm)}.")
             blocks.append(axis_block("rpm_axis_boost", "KFLDRL / KFLDIMX RPM axis (paste into WinOLS)", axis_rpm, "RPM"))
     maps = generate_boost_maps(
         d, p.vars,
@@ -252,7 +249,7 @@ def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
         axis_rpm=axis_rpm, axis_boost=p.axis("boost") if axis_boost is None else axis_boost,
         axis_kfldrl_x=p.axis("kfldrl_x"),
         method=str(ctx.p("kfldrl_method", "splat")), finish=True,
-        spool_share=float(ctx.p("spool_boost_share", 90)),
+        spool_rpm=spool,
         out_of_reach=float(ctx.p("kfldrl_out_of_reach", DUTY_OUT_OF_REACH)),
         level_min_samples=float(ctx.p("kfldrl_level_samples", 3)),
         reference_column=reference_column, reference_label=reference_label, messages=ctx.messages,
@@ -297,7 +294,7 @@ def _pid(ctx: RunContext):
                                 "it has to be moved onto the new axis by hand.")
     d = ctx.logs.wot
     mode = str(ctx.p("ldr_mode", "sensitivity"))
-    spool = _spool(ctx, d)[0] if mode == "sensitivity" else None
+    spool = _spool(ctx) if mode == "sensitivity" else None
     q0s = p.base_map("base_ldrq0s")
     return _on_sheet(generate_pid_maps(
         axis_rpm=np.asarray(kfldrl.y_axis, dtype=float), q_maps=q_maps, curves=curves, mode=mode,

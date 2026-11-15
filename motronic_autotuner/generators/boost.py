@@ -134,8 +134,9 @@ def _fill_inside(row: np.ndarray, columns_boost: np.ndarray) -> np.ndarray:
     return out
 
 
-def finish_kfldrl(values, row_top, row_duty, columns_boost, axis_rpm, *, share: float = 90.0,
-                  out_of_reach: float = DUTY_OUT_OF_REACH, messages: list[str] | None = None) -> np.ndarray:
+def finish_kfldrl(values, row_top, row_duty, columns_boost, axis_rpm, *, spool_rpm: float | None = None,
+                  share: float = 90.0, out_of_reach: float = DUTY_OUT_OF_REACH,
+                  messages: list[str] | None = None) -> np.ndarray:
     """The hand finishing of KFLDRL, by spool region.
 
     Column 0 is 0 % (zero controller output: N75 off, gate on its spring) and
@@ -143,17 +144,18 @@ def finish_kfldrl(values, row_top, row_duty, columns_boost, axis_rpm, *, share: 
     linear in boost. The trailing gaps, targets a row's logs never reached,
     depend on where the row sits:
 
-    - spooled rows, those that reached ``share`` % of the highest boost of any
-      row, get the highest duty logged in them (``row_duty``): a ceiling that
-      was actually run, so a turbo out of breath at high rpm is not driven
-      harder than that;
+    - spooled rows, from the first axis point at or above ``spool_rpm`` (the
+      tuner's setting; without it, the rows that reached ``share`` % of the
+      highest boost of any row), get the highest duty logged in them
+      (``row_duty``): a ceiling that was actually run, so a turbo out of
+      breath at high rpm is not driven harder than that;
     - the row just below the first spooled row takes that row's duties: the
       ECU interpolates between the two, and 95 % here overboosts right after
       the spool;
     - rows further down get ``out_of_reach`` for the fastest spool, their
       first gap cell bridged at the duty the turbo holds after the spool;
-    - a row without data gets ``out_of_reach`` below the spool, or the row
-      under it above the spool.
+    - a row without data gets ``out_of_reach`` below the spool, or the
+      nearest spooled row above the spool.
     """
     messages = messages if messages is not None else []
     columns_boost = np.asarray(columns_boost, dtype=float).ravel()
@@ -167,20 +169,37 @@ def finish_kfldrl(values, row_top, row_duty, columns_boost, axis_rpm, *, share: 
         out = np.array(values, dtype=float)
         out[:, 0] = 0.0
         return out
-    peak = float(np.nanmax(top))
-    first = int(np.flatnonzero(np.nan_to_num(top, nan=-np.inf) >= share / 100.0 * peak)[0])
+    n_rows, width = v.shape
+    if spool_rpm:
+        at_or_above = np.flatnonzero(axis_rpm >= float(spool_rpm))
+        first = int(at_or_above[0]) if at_or_above.size else n_rows - 1
+        why = f"the spool rpm setting, {float(spool_rpm):g}"
+    else:
+        peak = float(np.nanmax(top))
+        first = int(np.flatnonzero(np.nan_to_num(top, nan=-np.inf) >= share / 100.0 * peak)[0])
+        why = f"where the row reaches {top[first]:.0f} hPa, {share:g} % of the {peak:.0f} hPa peak"
     logged = np.asarray(row_duty, dtype=float)[first:]
-    cap = float(np.nanmax(logged)) if np.isfinite(logged).any() else float(np.nanmax(v[first:]))
-    width = v.shape[1]
+    if np.isfinite(logged).any():
+        cap = float(np.nanmax(logged))
+    else:
+        cap = float(np.nanmax(row_duty)) if np.isfinite(row_duty).any() else float(np.nanmax(v))
 
     out = np.full_like(v, np.nan)
-    for r in range(first, v.shape[0]):
-        if not has[r]:
-            out[r] = out[r - 1]
+    for r in range(first, n_rows):
+        if has[r]:
+            row = _fill_inside(v[r], columns_boost)
+            row[~np.isfinite(row)] = cap
+            out[r] = row
+    for r in range(first, n_rows):
+        if has[r]:
             continue
-        row = _fill_inside(v[r], columns_boost)
-        row[~np.isfinite(row)] = cap
-        out[r] = row
+        above = [q for q in range(r + 1, n_rows) if has[q]]
+        if r > first:
+            out[r] = out[r - 1]
+        elif above:
+            out[r] = out[above[0]]
+        else:
+            out[r] = np.r_[0.0, np.full(width - 1, cap)]
     bridge = None
     if first > 0:
         t = first - 1
@@ -202,9 +221,8 @@ def finish_kfldrl(values, row_top, row_duty, columns_boost, axis_rpm, *, share: 
     out[:, 1:] = np.maximum.accumulate(out[:, 1:], axis=1)
     out[:, 0] = 0.0
 
-    msg = (f"KFLDRL finish: spooled from {axis_rpm[first]:.0f} rpm, where the row reaches {top[first]:.0f} hPa "
-           f"({share:g} % of the {peak:.0f} hPa peak); column 0 at 0 %; empty cells from there up get "
-           f"{cap:.1f} %, the highest duty logged in those rows")
+    msg = (f"KFLDRL finish: spooled from {axis_rpm[first]:.0f} rpm ({why}); column 0 at 0 %; empty cells from "
+           f"there up get {cap:.1f} %, the highest duty logged in those rows")
     if first > 0:
         msg += (f"; {axis_rpm[first - 1]:.0f} rpm takes the {axis_rpm[first]:.0f} rpm duties; rows below get "
                 f"{out_of_reach:g} %, the first empty cell bridged at {bridge:.1f} %")
@@ -226,7 +244,7 @@ def generate_boost_maps(
     safety_margin: float = 0.0,
     method: str = "splat",
     finish: bool = False,
-    spool_share: float = 90.0,
+    spool_rpm: float | None = None,
     out_of_reach: float = DUTY_OUT_OF_REACH,
     level_min_samples: float = 3.0,
     reference_column: str | None = None,
@@ -239,7 +257,8 @@ def generate_boost_maps(
     ``level_min_samples`` is the weight a duty level needs at an rpm point to count there (rows and finish).
     ``reference_column``, when given, is the pressure the boost is measured from, row by row (ME7.6.2:
     the base boost plgru, which its LDR subtracts from the target), in place of pu or the ambient setting;
-    ``reference_label`` names the KFLDRL columns accordingly."""
+    ``reference_label`` names the KFLDRL columns accordingly. ``spool_rpm`` is the tuner's spool point for the
+    finish; without it the finish judges the spool from the logs (90 % of the highest boost of any row)."""
     messages = messages if messages is not None else []
     if method not in KFLDRL_METHODS:
         raise ValueError(f"unknown KFLDRL method {method!r}")
@@ -276,13 +295,13 @@ def generate_boost_maps(
     finished = None
     if finish:
         spool_top = row_top
-        if reference_column:
-            # the spool is judged on the boost above ambient: a reference that falls with rpm (ME7.6.2 plgru)
-            # would put the peak of "boost above it" at high rpm where the absolute boost is already falling
+        if reference_column and not spool_rpm:
+            # judged from the logs, the spool is taken on the boost above ambient: a reference that falls with rpm
+            # (ME7.6.2 plgru) would put the peak of "boost above it" at high rpm where the absolute boost is falling
             lift, _ = linear_1d(rpm, reference - ambient_pressure, axis_rpm, 1.0)
             spool_top = row_top + np.nan_to_num(lift, nan=0.0)
         finished = np.clip(finish_kfldrl(kfldrl, spool_top, row_duty, physical_boost_axis, axis_rpm,
-                                         share=spool_share, out_of_reach=out_of_reach, messages=messages),
+                                         spool_rpm=spool_rpm, out_of_reach=out_of_reach, messages=messages),
                            0.0, WGDC_CLAMP_MAX)
     if fill_missing:
         kfldrl = fill_gaps(kfldrl, physical_boost_axis, axis_rpm)
@@ -313,44 +332,9 @@ def generate_boost_maps(
     return maps
 
 
-SPOOL_BOOST_SHARE = 90.0
-"""Share of the peak boost (percent) that defines the spool point."""
-SPOOL_BIN_RPM = 50.0
-SPOOL_MIN_BIN_SAMPLES = 3
 AXIS_POINTS = 16
 AXIS_FINE_STEP, AXIS_COARSE_STEP = 250.0, 500.0
 AXIS_POINTS_BELOW, AXIS_FINE_ABOVE = 4, 5
-
-
-def detect_spool_rpm(rpm, rel_boost, *, share: float = SPOOL_BOOST_SHARE,
-                     bin_rpm: float = SPOOL_BIN_RPM, min_bin_samples: int = SPOOL_MIN_BIN_SAMPLES):
-    """The lowest rpm at which the boost reaches ``share`` percent of the
-    highest boost logged, from the wide-open rows. Boost is the median of
-    each ``bin_rpm`` bin with at least ``min_bin_samples`` rows, so a single
-    sample cannot set the point, and the peak is the highest bin median.
-    The wastegate duty is deliberately not a condition: on a car that makes
-    its boost on the spring the modulated duty never rises, and it rises
-    last at high rpm, which is the opposite of a spool.
-    Returns ``(rpm, info)`` or ``(None, info)``.
-    """
-    rpm = np.asarray(rpm, dtype=float)
-    rel_boost = np.asarray(rel_boost, dtype=float)
-    ok = np.isfinite(rpm) & np.isfinite(rel_boost)
-    bins = np.floor(rpm[ok] / bin_rpm) * bin_rpm
-    medians: dict[float, float] = {}
-    for b in np.unique(bins):
-        sel = bins == b
-        if int(sel.sum()) >= min_bin_samples:
-            medians[float(b)] = float(np.median(rel_boost[ok][sel]))
-    info = {"rows": int(ok.sum()), "bins": len(medians), "share": share}
-    if not medians:
-        return None, info
-    peak = max(medians.values())
-    target = peak * share / 100.0
-    spool = min(b for b, m in medians.items() if m >= target)
-    info.update(peak=peak, target=target, boost_at_spool=medians[spool],
-                peak_rpm=max(medians, key=medians.get))
-    return spool, info
 
 
 def spool_rpm_axis(spool: float, *, n: int = AXIS_POINTS, fine: float = AXIS_FINE_STEP, coarse: float = AXIS_COARSE_STEP,

@@ -111,6 +111,33 @@ def test_finish_by_spool_region():
     assert "spooled from 3000 rpm" in messages[0] and "86.0 %" in messages[0]
 
 
+def test_finish_takes_the_spool_from_the_setting():
+    columns = np.array([400.0, 500, 600, 700, 800])
+    axis = np.array([1500.0, 2000, 2500, 3000, 3500, 4000])
+    nan = np.nan
+    values = np.array([
+        [nan, nan, nan, nan, nan],
+        [40.0, 60.0, nan, nan, nan],
+        [30.0, 50.0, 70.0, nan, nan],
+        [nan, nan, nan, nan, nan],      # the spool setting lands on a row without logs
+        [20.0, 45.0, 60.0, 72.0, 78.0],
+        [20.0, 45.0, 55.0, 65.0, nan],
+    ])
+    row_top = np.array([nan, 500.0, 610.0, nan, 800.0, 760.0])
+    row_duty = np.array([nan, 75.0, 75.0, nan, 80.0, 86.0])
+    messages = []
+    out = finish_kfldrl(values, row_top, row_duty, columns, axis, spool_rpm=2900, messages=messages)
+    assert "spooled from 3000 rpm (the spool rpm setting, 2900)" in messages[0]
+    assert out[3].tolist() == out[4].tolist() == [0, 45, 60, 72, 78]     # the next spooled row with logs
+    assert out[2].tolist() == [0, 50, 70, 72, 78]                         # just below the spool: the spooled duties
+    assert out[1].tolist() == [0, 60, 78, 95, 95]
+    assert out[5].tolist() == [0, 45, 55, 65, 86]
+    # a spool above the axis: only the last row counts as spooled
+    out = finish_kfldrl(values, row_top, row_duty, columns, axis, spool_rpm=9000, messages=[])
+    assert out[-1].tolist() == [0, 45, 55, 65, 86] and out[-2].tolist() == [0, 45, 60, 72, 78]
+    assert out[3].tolist() == [0, 95, 95, 95, 95]                         # no logs, below the spool
+
+
 def test_finish_without_data_leaves_the_map_and_says_so():
     messages = []
     out = finish_kfldrl(np.full((2, 3), np.nan), np.full(2, np.nan), np.full(2, np.nan), np.array([1.0, 2, 3]),
