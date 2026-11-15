@@ -91,7 +91,11 @@ family means one `TargetMap` line and one generator wrapper.
   - This replaces the splat's flat treads, where one forced level filled two
     columns with the same duty.
   - Then the finish, after the user's hand edits on the Seat Leon 1.8T
-    (366426):
+    (366426). Since 2026-11-15 there is no tickbox: the Boost sheet always
+    carries the calculated KFLDRL (gaps, sample weights) followed by
+    "KFLDRL finished" (key kfldrl_finished, paste into WinOLS). The old
+    fill only touches the calculated block; the PID reads the calculated
+    one. The finish does this:
     - Column 0 is 0 %.
     - Rows rise with the target.
     - Holes are linear in boost.

@@ -121,17 +121,15 @@ KFLDRL = [
                   "duty change while the boost still lags."),
     ParamSpec("min_samples_base_wg", "Min samples per cell", "int", 1, section=BOOST, group="KFLDRL / KFLDIMX",
               minimum=0, tip="The splat KFLDRL, the absolute WGDC map and the base-WG curve behind KFVPDKSD."),
-    ParamSpec("kfldrl_finish", "Finish the map", "bool", True, section=BOOST, group="KFLDRL finish",
-              tip="Column 0 at 0 %, every row rising with the target, empty cells by spool region: 95 % below "
-                  "the spool, the spooled row's duties on the row just below it, the highest logged duty above it."),
     ParamSpec("kfldrl_out_of_reach", "Below the spool, unreached targets", "float", 95.0, section=BOOST,
               group="KFLDRL finish", unit="%", decimals=1, minimum=0, maximum=95,
-              enabled_when=("kfldrl_finish", True),
-              tip="Duty for the targets a row below the spool never reached: gate shut for the fastest spool. "
-                  "The first such cell is bridged at the duty the turbo holds after the spool."),
-    ParamSpec("fill_missing_data", "Fill empty cells by interpolation (old)", "bool", False, section=BOOST,
-              group="KFLDRL finish", enabled_when=("kfldrl_finish", False),
-              tip="Only with the finish off: linear inside the data, nearest outside it, last column 100 %."),
+              tip="The finished KFLDRL block (always written after the calculated one): duty for the targets a "
+                  "row below the spool never reached, gate shut for the fastest spool. The first such cell is "
+                  "bridged at the duty the turbo holds after the spool."),
+    ParamSpec("fill_missing_data", "Fill the calculated KFLDRL's empty cells (old)", "bool", False, section=BOOST,
+              group="KFLDRL finish",
+              tip="The old MATLAB fill, on the calculated block only: linear inside the data, nearest outside it, "
+                  "last column 100 %. The finished block does not use it."),
 ]
 KFVPDKSD = [
     ParamSpec("auto_axis_kfvp", "Auto pressure-ratio axis", "bool", False, section=BOOST, group="KFVPDKSD",
@@ -222,11 +220,12 @@ def _spool(ctx: RunContext, d):
 
 def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
            reference_label: str = "Target Rel Boost (mbar)", axis_boost=None, blocks=None):
-    """KFLDIMX / KFLDRL; with the auto-axis tick the rpm axis is rebuilt around
-    the spool point found in the WOT rows and written out as a block. A
-    family without the KFLDRL method / finish settings keeps the splat. A
-    family wrapper may pass its own WOT rows, the column the boost is
-    measured from, a KFLDIMX axis and blocks to put first (ME7.6.2)."""
+    """KFLDIMX / KFLDRL, the calculated KFLDRL followed by the finished one; with
+    the auto-axis tick the rpm axis is rebuilt around the spool point found in
+    the WOT rows and written out as a block. A family without the KFLDRL
+    method setting keeps the splat. A family wrapper may pass its own WOT rows,
+    the column the boost is measured from, a KFLDIMX axis and blocks to put
+    first (ME7.6.2)."""
     p = ctx.preset
     d = ctx.logs.wot if data is None else data
     cwldimx = bool(ctx.p("cwldimx", False))
@@ -252,7 +251,7 @@ def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
         fill_missing=bool(ctx.p("fill_missing_data", False)),
         axis_rpm=axis_rpm, axis_boost=p.axis("boost") if axis_boost is None else axis_boost,
         axis_kfldrl_x=p.axis("kfldrl_x"),
-        method=str(ctx.p("kfldrl_method", "splat")), finish=bool(ctx.p("kfldrl_finish", False)),
+        method=str(ctx.p("kfldrl_method", "splat")), finish=True,
         spool_share=float(ctx.p("spool_boost_share", 90)),
         out_of_reach=float(ctx.p("kfldrl_out_of_reach", DUTY_OUT_OF_REACH)),
         level_min_samples=float(ctx.p("kfldrl_level_samples", 3)),

@@ -37,10 +37,10 @@ def forced_level_log(n_per_level=3000, seed=3):
     return pd.concat(rows, ignore_index=True)
 
 
-def kfldrl(data, **kw):
+def kfldrl(data, key="kfldrl", **kw):
     maps = generate_boost_maps(data, V, cwldimx=False, ambient_pressure=1000, min_samples=1, fill_missing=False,
                                axis_rpm=AXIS_RPM, axis_boost=np.array([300.0, 1200.0]), axis_kfldrl_x=COLUMNS, **kw)
-    return next(m for m in maps if m.key == "kfldrl")
+    return next(m for m in maps if m.key == key)
 
 
 def test_rows_interpolate_between_the_levels_instead_of_treads():
@@ -122,7 +122,7 @@ def test_finish_without_data_leaves_the_map_and_says_so():
 def test_finish_fills_the_rows_map_like_the_hand_finish():
     data = forced_level_log()
     messages = []
-    k = kfldrl(data, method="rows", finish=True, messages=messages).values
+    k = kfldrl(data, key="kfldrl_finished", method="rows", finish=True, messages=messages).values
     assert not np.isnan(k).any() and (k[:, 0] == 0).all() and k.max() <= 95
     assert (np.diff(k[:, 1:], axis=1) >= 0).all()
     assert (k[0, 1:] == 95).all()                                  # 1500 rpm: nothing reached, gate shut
@@ -130,21 +130,24 @@ def test_finish_fills_the_rows_map_like_the_hand_finish():
     assert any(m.startswith("KFLDRL finish: spooled from") for m in messages)
 
 
-def test_me7_and_opel_run_the_rows_and_the_finish_by_default():
+def test_me7_and_opel_write_the_calculated_and_the_finished_kfldrl():
     for family in (BOSCH_ME7, BOSCH_ME155):
         preset = family.default_preset()
-        assert preset.params["kfldrl_method"] == "rows" and preset.params["kfldrl_finish"] is True
+        assert preset.params["kfldrl_method"] == "rows" and "kfldrl_finish" not in preset.params
     preset = BOSCH_ME7.default_preset()
     preset.axes = {"rpm_boost": AXIS_RPM, "boost": np.array([300.0, 1200.0]), "kfldrl_x": COLUMNS}
     data = forced_level_log()
     data[V["pedal"]] = 100.0
-    result = BOSCH_ME7.run_all(preset, SplitLogs(full=data, wot=data, warmup=data.iloc[:0], hot=data))
-    k = result.map("kfldrl").values
-    assert not np.isnan(k).any() and (k[:, 0] == 0).all()
-    preset.params["kfldrl_finish"] = False
-    preset.params["kfldrl_method"] = "splat"
-    k = BOSCH_ME7.run_all(preset, SplitLogs(full=data, wot=data, warmup=data.iloc[:0], hot=data)).map("kfldrl").values
-    assert np.isnan(k).any()
+    for method in ("rows", "splat"):
+        preset.params["kfldrl_method"] = method
+        result = BOSCH_ME7.run_all(preset, SplitLogs(full=data, wot=data, warmup=data.iloc[:0], hot=data))
+        keys = [m.key for m in result.maps]
+        assert keys.index("kfldrl_finished") == keys.index("kfldrl") + 1     # right after the calculated block
+        assert np.isnan(result.map("kfldrl").values).any()                   # the calculated block keeps its gaps
+        k = result.map("kfldrl_finished").values
+        assert not np.isnan(k).any() and (k[:, 0] == 0).all()
+        assert "paste into WinOLS" in result.map("kfldrl_finished").title
+        assert any(r.map_key == "kfldrl_finished" and r.status == "Calculated" for r in result.rows)
 
 
 def test_duty_levels_are_whole_percent_with_their_mean_duty():
@@ -165,9 +168,8 @@ def test_settings_form_greys_out_what_is_not_used():
     assert form.tabs is not None and [form.tabs.tabText(i) for i in range(form.tabs.count())] == \
         ["General", "Boost", "Airflow"]
     on = lambda key: form._widgets[key][1].isEnabled()  # noqa: E731
-    assert on("kfldrl_out_of_reach") and not on("fill_missing_data")
-    form.set_values({"kfldrl_finish": False, "ldr_mode": "overall"})
-    assert not on("kfldrl_out_of_reach") and on("fill_missing_data")
+    assert "kfldrl_finish" not in form.values()
+    assert on("kfldrl_out_of_reach") and on("fill_missing_data")
+    form.set_values({"kfldrl_finish": False, "ldr_mode": "overall"})       # an old preset's key is ignored
     assert on("ldr_min_file_duty") and not on("ldr_min_samples")
-    assert form.values()["kfldrl_finish"] is False
     assert app is not None

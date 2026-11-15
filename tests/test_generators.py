@@ -129,7 +129,7 @@ def test_family_run_all_with_missing_axes_reports_skips():
     logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
     result = BOSCH_ME7.run_all(preset, logs)
     keys = [m.key for m in result.maps]
-    assert keys == ["kfldimx", "kfldrl", "abs_wgdc"]
+    assert keys == ["kfldimx", "kfldrl", "kfldrl_finished", "abs_wgdc"]
     skipped = [r for r in result.rows if r.status.startswith("Skipped")]
     assert len(skipped) == 7
     assert all("Missing axes" in r.status or "Missing base maps" in r.status for r in skipped)
@@ -325,7 +325,7 @@ def test_me7_auto_axes_land_in_the_result():
     logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
     result = BOSCH_ME7.run_all(preset, logs)
     keys = [m.key for m in result.maps]
-    assert keys[:4] == ["rpm_axis_boost", "kfldimx", "kfldrl", "abs_wgdc"] and "pratio_axis_kfvp" in keys
+    assert keys[:5] == ["rpm_axis_boost", "kfldimx", "kfldrl", "kfldrl_finished", "abs_wgdc"] and "pratio_axis_kfvp" in keys
     axis = result.map("rpm_axis_boost").values
     assert 3150 <= axis[4] <= 3300 and axis.tolist() == spool_rpm_axis(axis[4]).tolist() and axis[-1] % 500 == 0
     assert result.map("kfldrl").y_axis.tolist() == axis.tolist() == result.map("kfldimx").y_axis.tolist()

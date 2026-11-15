@@ -234,7 +234,8 @@ def generate_boost_maps(
     messages: list[str] | None = None,
 ) -> list[CalibrationMap]:
     """``safety_margin`` is accepted for parity with the MATLAB signature; it was never applied there.
-    ``method`` is one of KFLDRL_METHODS; ``finish`` runs finish_kfldrl and then ``fill_missing`` is not used.
+    ``method`` is one of KFLDRL_METHODS. ``finish`` adds the finished KFLDRL (finish_kfldrl on the cells from
+    the logs) as a block of its own after the calculated one; ``fill_missing`` only fills the calculated one.
     ``level_min_samples`` is the weight a duty level needs at an rpm point to count there (rows and finish).
     ``reference_column``, when given, is the pressure the boost is measured from, row by row (ME7.6.2:
     the base boost plgru, which its LDR subtracts from the target), in place of pu or the ambient setting;
@@ -272,6 +273,7 @@ def generate_boost_maps(
                         f"whole percent with at least {level_min_samples:g} samples at an rpm point).")
     else:
         kfldrl, kfldrl_counts = bilinear(rel_boost, rpm, wgdc, physical_boost_axis, axis_rpm, min_samples)
+    finished = None
     if finish:
         spool_top = row_top
         if reference_column:
@@ -279,9 +281,10 @@ def generate_boost_maps(
             # would put the peak of "boost above it" at high rpm where the absolute boost is already falling
             lift, _ = linear_1d(rpm, reference - ambient_pressure, axis_rpm, 1.0)
             spool_top = row_top + np.nan_to_num(lift, nan=0.0)
-        kfldrl = finish_kfldrl(kfldrl, spool_top, row_duty, physical_boost_axis, axis_rpm, share=spool_share,
-                               out_of_reach=out_of_reach, messages=messages)
-    elif fill_missing:
+        finished = np.clip(finish_kfldrl(kfldrl, spool_top, row_duty, physical_boost_axis, axis_rpm,
+                                         share=spool_share, out_of_reach=out_of_reach, messages=messages),
+                           0.0, WGDC_CLAMP_MAX)
+    if fill_missing:
         kfldrl = fill_gaps(kfldrl, physical_boost_axis, axis_rpm)
         kfldrl[:, -1] = MAX_PID_LIMIT
     kfldrl = np.clip(kfldrl, 0.0, WGDC_CLAMP_MAX)
@@ -290,18 +293,24 @@ def generate_boost_maps(
     axis_boost_abs = axis_boost + offset
     abs_wgdc, abs_counts = bilinear(boost, rpm, wgdc, axis_boost_abs, axis_rpm, min_samples)
 
-    return [
+    maps = [
         CalibrationMap("kfldimx", "KFLDIMX (Linear Converter Map)", kfldimx, axis_boost, axis_rpm),
         CalibrationMap(
             "kfldrl", "KFLDRL (Base Linearization - WGDC %)", kfldrl, axis_kfldrl_x, axis_rpm,
             counts=kfldrl_counts, counts_title="KFLDRL - SAMPLE WEIGHTS",
             secondary_x_label=reference_label, secondary_x=physical_boost_axis,
         ),
-        CalibrationMap(
-            "abs_wgdc", "ABSOLUTE WGDC MAP (Abs Boost vs RPM)", abs_wgdc, axis_boost_abs, axis_rpm,
-            counts=abs_counts, counts_title="ABS WGDC - SAMPLE WEIGHTS",
-        ),
     ]
+    if finished is not None:
+        maps.append(CalibrationMap(
+            "kfldrl_finished", "KFLDRL finished (column 0 at 0 %, empty cells by spool region, paste into WinOLS)",
+            finished, axis_kfldrl_x, axis_rpm, secondary_x_label=reference_label, secondary_x=physical_boost_axis,
+        ))
+    maps.append(CalibrationMap(
+        "abs_wgdc", "ABSOLUTE WGDC MAP (Abs Boost vs RPM)", abs_wgdc, axis_boost_abs, axis_rpm,
+        counts=abs_counts, counts_title="ABS WGDC - SAMPLE WEIGHTS",
+    ))
+    return maps
 
 
 SPOOL_BOOST_SHARE = 90.0

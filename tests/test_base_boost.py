@@ -78,7 +78,7 @@ def test_reference_column_measures_the_boost_from_it_and_keeps_the_spool_on_ambi
     messages = []
     k = next(m for m in generate_boost_maps(data, V, finish=True, reference_column="ref",
                                             reference_label="Target above base boost plgru (hPa)",
-                                            messages=messages, **common) if m.key == "kfldrl")
+                                            messages=messages, **common) if m.key == "kfldrl_finished")
     assert k.secondary_x_label == "Target above base boost plgru (hPa)"
     r = list(axis_rpm).index(4500)
     # above the spring: 40 % -> +90, 60 % -> +270, 80 % -> +450 hPa; the 225 hPa column is 55 %
