@@ -249,6 +249,7 @@ def generate_boost_maps(
     level_min_samples: float = 3.0,
     reference_column: str | None = None,
     reference_label: str = "Target Rel Boost (mbar)",
+    pressure_scale: float = 1.0,
     messages: list[str] | None = None,
 ) -> list[CalibrationMap]:
     """``safety_margin`` is accepted for parity with the MATLAB signature; it was never applied there.
@@ -258,7 +259,11 @@ def generate_boost_maps(
     ``reference_column``, when given, is the pressure the boost is measured from, row by row (ME7.6.2:
     the base boost plgru, which its LDR subtracts from the target), in place of pu or the ambient setting;
     ``reference_label`` names the KFLDRL columns accordingly. ``spool_rpm`` is the tuner's spool point for the
-    finish; without it the finish judges the spool from the logs (90 % of the highest boost of any row)."""
+    finish; without it the finish judges the spool from the logs (90 % of the highest boost of any row).
+    ``pressure_scale`` is real hPa per hPa of the ECU: 2 with the 5120 patch, which keeps every pressure at
+    half its value. The KFLDIMX axis is in the ECU's units (desired boost - pu as the ECU holds them), the
+    logs in real ones (doubled at ingest), so the axis is scaled before the logs are placed on it; the
+    target row under KFLDRL and the absolute WGDC axis are then real hPa."""
     messages = messages if messages is not None else []
     if method not in KFLDRL_METHODS:
         raise ValueError(f"unknown KFLDRL method {method!r}")
@@ -280,7 +285,11 @@ def generate_boost_maps(
     ramp = (axis_boost - lo) / span * MAX_PID_LIMIT
     kfldimx = np.tile(ramp, (axis_rpm.size, 1))
 
-    physical_boost_axis = lo + (axis_kfldrl_x / MAX_PID_LIMIT) * span
+    physical_boost_axis = (lo + (axis_kfldrl_x / MAX_PID_LIMIT) * span) * pressure_scale
+    if pressure_scale != 1.0:
+        reference_label = f"{reference_label}, real: {pressure_scale:g} x the ECU axis (5120 patch)"
+        messages.append(f"KFLDRL: 5120 patch, the KFLDIMX axis ({lo:g} .. {hi:g} hPa in the ECU) is "
+                        f"{lo * pressure_scale:g} .. {hi * pressure_scale:g} hPa of real boost.")
     if method == "rows" or finish:
         level_boost, level_duty, level_w = duty_level_points(rpm, rel_boost, wgdc, axis_rpm,
                                                              min_samples=level_min_samples)
@@ -309,7 +318,7 @@ def generate_boost_maps(
     kfldrl = np.clip(kfldrl, 0.0, WGDC_CLAMP_MAX)
 
     offset = float(np.nanmedian(reference)) if reference_column and np.isfinite(reference).any() else ambient_pressure
-    axis_boost_abs = axis_boost + offset
+    axis_boost_abs = axis_boost * pressure_scale + offset
     abs_wgdc, abs_counts = bilinear(boost, rpm, wgdc, axis_boost_abs, axis_rpm, min_samples)
 
     maps = [

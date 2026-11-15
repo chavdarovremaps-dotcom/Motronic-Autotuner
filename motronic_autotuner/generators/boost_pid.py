@@ -217,7 +217,8 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                       logs_rpm=None, logs_boost=None, logs_duty=None, spool_rpm: float | None = None,
                       kfldrl: CalibrationMap | None = None, factory_kfldrl=None, factory_axis_rpm=None,
                       factory_axis_x=None, min_samples: float = MIN_LEVEL_SAMPLES, min_step: float = MIN_DUTY_STEP,
-                      min_file_duty: float = MIN_FILE_DUTY, messages: list[str] | None = None) -> list[CalibrationMap]:
+                      min_file_duty: float = MIN_FILE_DUTY, pressure_scale: float = 1.0,
+                      messages: list[str] | None = None) -> list[CalibrationMap]:
     """``q_maps`` maps "KFLDRQ0" / "KFLDRQ1" / "KFLDRQ2" to ``(base, axis_rpm, axis_deviation)``;
     ``curves`` maps "LDRQ0DY" / "LDRQ1DY" / "LDRQ1ST" to ``(base, axis_rpm)`` (``ldrq1st`` is the same
     as a curve). P goes into KFLDRQ0, or into LDRQ0DY in the curve layout, where ``ldrq0s`` is the
@@ -227,7 +228,9 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
     a map with an rpm axis of its own keeps it and is only scaled in the ratio modes.
 
     ``mode`` is "sensitivity" (P from the logs, the rest only moved onto the axis), or "overall" /
-    "per_rpm" (all gains scaled by the duty ratio).
+    "per_rpm" (all gains scaled by the duty ratio). ``pressure_scale`` is real hPa per hPa of the ECU
+    (2 with the 5120 patch): the logged boost is real, the deviation the ECU multiplies P with is not,
+    so P from the logs is multiplied by it. The duty ratio has no pressure in it.
     """
     messages = messages if messages is not None else []
     curves = dict(curves or {})
@@ -267,12 +270,16 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
     if mode == "sensitivity":
         levels, table, weights = boost_per_duty(logs_rpm, logs_boost, logs_duty, axis_rpm, min_samples=min_samples)
         res = p_from_sensitivity(levels, table, axis_rpm, spool_rpm, min_step=min_step)
+        # the logs are in real hPa; with the 5120 patch the ECU sees half the deviation, so its P is
+        # pressure_scale times the real one for the same duty step
+        res["p_raw"], res["p_used"] = res["p_raw"] * pressure_scale, res["p_used"] * pressure_scale
         if p_name is None:
             messages.append("Boost PID: neither KFLDRQ0 nor LDRQ0DY imported, P not calculated.")
         elif np.isnan(res["p_used"]).all():
             messages.append(f"Boost PID: no rpm point after the spool shows boost rising with duty, {p_name} not "
                             "calculated.")
         else:
+            unit = " in the ECU" if pressure_scale != 1.0 else ""
             file_p = np.asarray(out[p_name][0], dtype=float)
             file_p = file_p[:, 0] if file_p.ndim == 2 else file_p
             if old_layout:
@@ -286,6 +293,9 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                 f"{np.nanmin(res['p_used']):.2f} to {np.nanmax(res['p_used']):.2f} %/100 hPa; spool at "
                 f"{spool_rpm:g} rpm, the points below it take the first P after it." if spool_rpm is not None else
                 f"Boost PID: P ({p_name}) from the logs at {sum(from_logs)} of {axis_rpm.size} rpm points.")
+            if pressure_scale != 1.0:
+                messages.append(f"Boost PID: 5120 patch, the ECU sees the deviation at 1/{pressure_scale:g} of the "
+                                f"real boost, so P is {pressure_scale:g} x the real-hPa value.")
             if old_layout:
                 held = f" ({ldrq0s:g} in the file)" if ldrq0s is not None else ""
                 messages.append(f"Boost PID: LDRQ0S, the stationary P (one value){held}, is left as it is.")
@@ -293,7 +303,7 @@ def generate_pid_maps(*, axis_rpm: np.ndarray, q_maps: dict[str, tuple[np.ndarra
                 "ldr_sensitivity", "Boost sensitivity and P per rpm", np.vstack([
                     res["rise"], res["low"], res["high"], res["p_raw"], res["p_used"], file_p]),
                 axis_rpm, ["Steepest rise (hPa per 10 % duty)", "From duty (%)", "To duty (%)",
-                           "P from the logs (%/100 hPa)", "P used (%/100 hPa)", "File P on this axis"],
+                           f"P from the logs (%/100 hPa{unit})", f"P used (%/100 hPa{unit})", "File P on this axis"],
                 corner_label="Sensitivity \\ RPM"))
             used = np.isfinite(table).any(axis=1)                           # duties with at least one usable cell
             maps.append(CalibrationMap(

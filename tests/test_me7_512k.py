@@ -119,7 +119,9 @@ def test_manifold_model_on_urlnm_and_prgnm():
 
     preset.prep["hack_5120"] = True
     doubled = BOSCH_ME7.run_all(preset, SplitLogs(full=data, wot=data, warmup=data.iloc[:0], hot=data))
-    np.testing.assert_allclose(doubled.map("urlnm").values, np.asarray(url.values) * 2)
+    np.testing.assert_allclose(np.asarray(doubled.map("urlnm").values)[1:], np.asarray(url.values)[1:] * 2)
+    assert np.asarray(doubled.map("urlnm").values)[0] == 0.0919          # the file's own value stays in ECU units
+    assert np.asarray(doubled.map("prgnm").values)[0] == 95.0
     assert any(r.name == "5120 Patch" and "URLNM*2" in r.size for r in doubled.rows)
 
 

@@ -198,7 +198,9 @@ def _boost(ctx: RunContext):
     target = p.var("boost_target")
     imported = p.axis("boost")
     if bool(ctx.p("auto_axis_kfldimx", True)) and target and target in data.columns:
-        axis_boost = kfldimx_axis(column(data, target) - plgru, imported.size if imported is not None else 8)
+        # the logs are real hPa; the axis goes into the ECU, which keeps pressures at half with the 5120 patch
+        axis_boost = kfldimx_axis((column(data, target) - plgru) / me7.pressure_scale(ctx),
+                                  imported.size if imported is not None else 8)
         if axis_boost is not None:
             ctx.messages.append(f"Auto axis KFLDIMX: 0 to {axis_boost[-1]:g} hPa above base boost, "
                                 f"{', '.join(f'{a:g}' for a in axis_boost)}.")

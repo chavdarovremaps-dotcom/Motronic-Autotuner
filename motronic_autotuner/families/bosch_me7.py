@@ -212,6 +212,12 @@ def _on_sheet(maps, sheet: str):
     return maps
 
 
+def pressure_scale(ctx: RunContext) -> float:
+    """Real hPa per hPa of the ECU: 2 with the 5120 patch, which keeps every pressure at half its value.
+    The logs are doubled at ingest; maps and axes from the file stay in the ECU's units."""
+    return 2.0 if ctx.preset.prep.get("hack_5120", False) else 1.0
+
+
 def _spool(ctx: RunContext) -> float | None:
     """The turbo spool rpm the tuner entered, or None when it is not set (0)."""
     spool = float(ctx.p("spool_rpm", 0) or 0)
@@ -252,7 +258,8 @@ def _boost(ctx: RunContext, *, data=None, reference_column: str | None = None,
         spool_rpm=spool,
         out_of_reach=float(ctx.p("kfldrl_out_of_reach", DUTY_OUT_OF_REACH)),
         level_min_samples=float(ctx.p("kfldrl_level_samples", 3)),
-        reference_column=reference_column, reference_label=reference_label, messages=ctx.messages,
+        reference_column=reference_column, reference_label=reference_label, pressure_scale=pressure_scale(ctx),
+        messages=ctx.messages,
     )
     return _on_sheet(blocks + maps, "Boost")
 
@@ -304,7 +311,7 @@ def _pid(ctx: RunContext):
         factory_axis_rpm=p.axis("rpm_boost"), factory_axis_x=p.axis("kfldrl_x"),
         min_samples=float(ctx.p("ldr_min_samples", MIN_LEVEL_SAMPLES)),
         min_step=float(ctx.p("ldr_min_duty_step", MIN_DUTY_STEP)),
-        min_file_duty=float(ctx.p("ldr_min_file_duty", 20)), messages=ctx.messages,
+        min_file_duty=float(ctx.p("ldr_min_file_duty", 20)), pressure_scale=pressure_scale(ctx), messages=ctx.messages,
     ), "Boost")
 
 
@@ -439,12 +446,17 @@ def _manifold_curves(ctx: RunContext):
     """The manifold model of a 512 kB ME7.5 without cam-dependent maps: URLNM
     (ps -> rl factor) and PRGNM (residual gas pressure), curves over rpm. The
     line is fitted on URLNM's real points as KFURL / KFPRG are; points without
-    a fit keep the file's value. KFPBRK follows from the residual as usual."""
+    a fit keep the file's value. KFPBRK follows from the residual as usual.
+    The fit is in real hPa; with the 5120 patch the file's values are moved
+    to real hPa too before they are mixed in, and the post-process takes the
+    whole curve back to the ECU's units."""
     p = ctx.preset
     msgs = ctx.messages
     min_samples = float(ctx.p("min_samples", 1))
     vvt_threshold = float(ctx.p("vvt_threshold", 18))
+    scale = pressure_scale(ctx)
     axis_url, base_url = p.axis("rpm_urlnm"), p.base_map("base_urlnm")
+    base_url = None if base_url is None else np.asarray(base_url, dtype=float) / scale
     n_url = real_points(axis_url)
     fit_rpm = np.asarray(axis_url, dtype=float)[:n_url]
     fit = {m.key: m for m in generate_manifold_maps(
@@ -463,6 +475,7 @@ def _manifold_curves(ctx: RunContext):
                                counts_title="URLNM / PRGNM - ROWS PER RPM POINT"))
     prg_model = None
     axis_prg, base_prg = p.axis("rpm_prgnm"), p.base_map("base_prgnm")
+    base_prg = None if base_prg is None else np.asarray(base_prg, dtype=float) * scale
     if axis_prg is None or base_prg is None:
         msgs.append("  PRGNM not imported: KFPBRK uses the fitted residual gas pressure where it has one.")
         prg_model = np.where(np.isfinite(prg_fit), prg_fit, np.nanmean(prg_fit) if np.isfinite(prg_fit).any() else 0.0)

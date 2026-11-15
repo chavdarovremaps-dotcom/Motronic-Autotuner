@@ -119,6 +119,23 @@ family means one `TargetMap` line and one generator wrapper.
   - Labels are short, and the long explanation is in the tooltip.
   - The safety_margin field is gone from the form: it was never applied,
     not even in MATLAB.
+- 5120 patch (2026-11-15): the ECU keeps every pressure at half its value.
+  The ingest doubles the logged pressure columns, so the logs are real hPa;
+  maps and axes from the file stay in the ECU's units. pressure_scale(ctx)
+  = 2 bridges the two:
+  - KFLDIMX axis (desired boost - pu, as the ECU holds them) x 2 before the
+    logs are placed on it. The target row under KFLDRL and the absolute
+    WGDC axis are then real hPa. The KFLDIMX ramp itself does not change.
+  - P from the boost sensitivity x 2: the ECU sees the deviation at half,
+    so it needs twice the gain for the same duty step. I, D and the duty
+    ratio carry no pressure.
+  - KFURL x 2, KFPRG / 2 (as before), and URLNM / PRGNM likewise. Points
+    that keep the file's value are taken to real hPa first, so they come
+    back unchanged.
+  - The ME7.6.2 auto KFLDIMX axis is written in the ECU's units.
+  - Its DPLPU / KFVPDKSE are not scaled; no Opel car with the patch so far.
+  - Unaffected: KFVPDKSD (a pressure ratio), KFPBRK (a factor), the MAF
+    check (real boost against airflow).
 - MAF check (ME7, 2026-11-02), information only: ml_w against the airflow
   at a reference VE (90 %, parameter) from pvdks_w (not ps_w, which is the
   ECU's MAF-based model), tanslin (after the intercooler on the 1.8T) and

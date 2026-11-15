@@ -200,3 +200,33 @@ def test_settings_form_greys_out_what_is_not_used():
     form.set_values({"kfldrl_finish": False, "ldr_mode": "overall"})       # an old preset's key is ignored
     assert on("ldr_min_file_duty") and not on("ldr_min_samples")
     assert app is not None
+
+
+def test_5120_patch_reads_the_kfldimx_axis_in_the_ecu_units():
+    data = forced_level_log()                                     # real hPa, as the ingest leaves them
+    normal = kfldrl(data, method="rows")
+    messages = []
+    patched = next(m for m in generate_boost_maps(
+        data, V, cwldimx=False, ambient_pressure=1000, min_samples=1, fill_missing=False, axis_rpm=AXIS_RPM,
+        axis_boost=np.array([150.0, 600.0]), axis_kfldrl_x=COLUMNS, method="rows", pressure_scale=2.0,
+        messages=messages) if m.key == "kfldrl")                # the same axis as the ECU holds it: half
+    np.testing.assert_allclose(patched.values, normal.values, equal_nan=True)
+    assert patched.secondary_x.tolist() == normal.secondary_x.tolist()
+    assert "5120 patch" in patched.secondary_x_label
+    assert any("150 .. 600 hPa in the ECU) is 300 .. 1200 hPa of real boost" in m for m in messages)
+
+
+def test_5120_patch_doubles_p_and_nothing_else_in_the_pid():
+    from test_generators import forced_duty_log, pid_preset
+    data = forced_duty_log()
+    logs = SplitLogs(full=data, wot=data, warmup=pd.DataFrame(), hot=data)
+    preset = pid_preset()
+    preset.params["spool_rpm"] = 3200.0
+    plain = BOSCH_ME7.run_all(preset, logs)
+    preset.prep["hack_5120"] = True
+    preset.axes["boost"] = preset.axes["boost"] / 2                 # the ECU's KFLDIMX axis with the patch
+    patched = BOSCH_ME7.run_all(preset, logs)
+    np.testing.assert_allclose(patched.map("kfldrq0_corrected").values, plain.map("kfldrq0_corrected").values * 2)
+    np.testing.assert_allclose(patched.map("kfldrq1_corrected").values, plain.map("kfldrq1_corrected").values)
+    np.testing.assert_allclose(patched.map("kfldrl").values, plain.map("kfldrl").values, equal_nan=True)
+    assert any("P is 2 x the real-hPa value" in m for m in patched.messages)
