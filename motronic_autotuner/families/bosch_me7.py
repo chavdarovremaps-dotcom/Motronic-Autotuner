@@ -346,7 +346,7 @@ def _fuel(ctx: RunContext):
         ctx.logs.hot, p.vars,
         min_samples=float(ctx.p("min_samples", 1)),
         trim_format=str(ctx.p("trim_format", "lambda")),
-        axis_rpm=p.axis("rpm_fuel"), axis_te=p.axis("te"),
+        axis_rpm=p.axis("rpm_fuel"), axis_te=p.axis("te"), messages=ctx.messages,
     ), "Fueling")
 
 

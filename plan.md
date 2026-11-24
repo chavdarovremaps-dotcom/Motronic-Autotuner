@@ -119,6 +119,13 @@ family means one `TargetMap` line and one generator wrapper.
   - Labels are short, and the long explanation is in the tooltip.
   - The safety_margin field is gone from the form: it was never applied,
     not even in MATLAB.
+- Fueling maps (FKKVS, KFFWL, KFFWLW, FKKVS_RL; ME7 and the Opel families,
+  2026-11-24) leave out rows whose short-term trim is exactly neutral (1.0
+  lambda, 0 %): the lambda control is not running there (cold start, fuel
+  cut, open loop). frm_w steps in about 0.00003, so only exact 1.0 goes
+  (tolerance 1e-5). On the A4 that was 28 % of hot rows, almost none at WOT
+  (frm_w holds its last value there), and moved one FKKVS cell from -1.6 to
+  -17.6 %; on the Leon 9 % of rows. MG1 and MS43 fuel are not changed.
 - 5120 patch (2026-11-15): the ECU keeps every pressure at half its value.
   The ingest doubles the logged pressure columns, so the logs are real hPa;
   maps and axes from the file stay in the ECU's units. pressure_scale(ctx)

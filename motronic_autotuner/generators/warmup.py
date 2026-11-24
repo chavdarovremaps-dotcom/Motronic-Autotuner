@@ -2,7 +2,9 @@
 
 Port of Scripts/Utilities/GenerateWarmupMaps.m. The MATLAB code hard-coded
 80 degrees C as the hot threshold; here it is ``hot_temp`` and the family
-passes the ingestion tab's warmup max temp, which defaults to 80.
+passes the ingestion tab's warmup max temp, which defaults to 80. Rows with
+the short-term trim at exactly neutral (lambda control not running, as on a
+cold start before the sensor is ready) are left out of all three maps.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import pandas as pd
 
 from ..core.maps import CalibrationMap
 from ..core.splatting import bilinear, linear_1d
-from . import column, trim_percent
+from . import column, drop_lambda_off, trim_percent
 
 MIN_HOT_ROWS = 10
 
@@ -39,6 +41,8 @@ def generate_warmup_maps(
         name = v[key]
         if name not in data_warmup.columns or name not in data_full.columns:
             raise KeyError(f"Missing required variable for Warmup: {name}")
+    data_warmup = drop_lambda_off(data_warmup, v, trim_format, "Warm-up rows", messages)
+    data_full = drop_lambda_off(data_full, v, trim_format, "Warm-up hot reference", messages)
 
     trim_hot_all = trim_percent(column(data_full, v["stft"]), column(data_full, v["ltft"]), trim_format)
     trim_cold = trim_percent(column(data_warmup, v["stft"]), column(data_warmup, v["ltft"]), trim_format)
